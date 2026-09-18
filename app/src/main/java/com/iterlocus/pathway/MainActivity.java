@@ -150,6 +150,14 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
     /*============================== 历史记录 相关 ==============================*/
     private SQLiteDatabase mLocationHistoryDB;
     private SQLiteDatabase mSearchHistoryDB;
+    /* 历史记录专用的逆地理编码器。不复用 mGeoCoder：那个的监听器负责渲染地图上的
+     * POI 信息窗，职责不同，混用会让一次编码触发两处副作用。 */
+    private GeoCoder mHistoryGeoCoder;
+    /* 等待编码结果的那条记录（bd09 与 wgs84 两套坐标都要入库） */
+    private double mHistoryPendingLng;
+    private double mHistoryPendingLat;
+    private double mHistoryPendingLngWgs;
+    private double mHistoryPendingLatWgs;
     /*============================== SearchView 相关 ==============================*/
     private SearchView searchView;
     private ListView mSearchList;
@@ -207,6 +215,8 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
 
         initStoreHistory();
 
+        initHistoryGeoCoder();
+
         initSearchView();
 
         initUpdateVersion();
@@ -260,6 +270,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
 
         //poi search destroy
         mSuggestionSearch.destroy();
+        mHistoryGeoCoder.destroy();
 
         //close db
         mLocationHistoryDB.close();
@@ -921,78 +932,61 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
         return data;
     }
 
-    // 记录请求的位置信息
-    private void recordCurrentLocation(double lng, double lat) {
-        //参数坐标系：bd09
-        final String safeCode = BuildConfig.MAPS_SAFE_CODE;
-        final String ak = sharedPreferences.getString("setting_map_key", BuildConfig.MAPS_API_KEY);
-        double[] latLng = MapUtils.bd2wgs(lng, lat);
-        //bd09坐标的位置信息
-        String mapApiUrl = "https://api.map.baidu.com/reverse_geocoding/v3/?ak=" + ak + "&output=json&coordtype=bd09ll" + "&location=" + lat + "," + lng + "&mcode=" + safeCode;
-
-        okhttp3.Request request = new okhttp3.Request.Builder().url(mapApiUrl).get().build();
-        final Call call = mOkHttpClient.newCall(request);
-        call.enqueue(new Callback() {
+    // 历史记录专用的逆地理编码器
+    private void initHistoryGeoCoder() {
+        mHistoryGeoCoder = GeoCoder.newInstance();
+        mHistoryGeoCoder.setOnGetGeoCodeResultListener(new OnGetGeoCoderResultListener() {
             @Override
-            public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                //http 请求失败
-                XLog.e("HTTP: HTTP GET FAILED");
-                //插表参数
-                ContentValues contentValues = new ContentValues();
-                contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LOCATION, mMarkName);
-                contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_WGS84, String.valueOf(latLng[0]));
-                contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_WGS84, String.valueOf(latLng[1]));
-                contentValues.put(DataBaseHistoryLocation.DB_COLUMN_TIMESTAMP, System.currentTimeMillis() / 1000);
-                contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_CUSTOM, Double.toString(lng));
-                contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_CUSTOM, Double.toString(lat));
-
-                DataBaseHistoryLocation.saveHistoryLocation(mLocationHistoryDB, contentValues);
+            public void onGetGeoCodeResult(GeoCodeResult geoCodeResult) {
+                // 只使用逆地理编码，正地理编码不处理
             }
 
             @Override
-            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                ResponseBody responseBody = response.body();
-                if (responseBody != null) {
-                    String resp = responseBody.string();
-                    try {
-                        JSONObject getRetJson = new JSONObject(resp);
-
-                        if (Integer.parseInt(getRetJson.getString("status")) == 0) { // 位置获取成功
-                            JSONObject posInfoJson = getRetJson.getJSONObject("result");
-                            String formatted_address = posInfoJson.getString("formatted_address");
-                            ContentValues contentValues = new ContentValues();
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LOCATION, formatted_address);
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_WGS84, String.valueOf(latLng[0]));
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_WGS84, String.valueOf(latLng[1]));
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_TIMESTAMP, System.currentTimeMillis() / 1000);
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_CUSTOM, Double.toString(lng));
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_CUSTOM, Double.toString(lat));
-                            DataBaseHistoryLocation.saveHistoryLocation(mLocationHistoryDB, contentValues);
-                        } else {
-                            ContentValues contentValues = new ContentValues();
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LOCATION, mMarkName == null ? getRetJson.getString("message"): mMarkName);
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_WGS84, String.valueOf(latLng[0]));
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_WGS84, String.valueOf(latLng[1]));
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_TIMESTAMP, System.currentTimeMillis() / 1000);
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_CUSTOM, Double.toString(lng));
-                            contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_CUSTOM, Double.toString(lat));
-                            DataBaseHistoryLocation.saveHistoryLocation(mLocationHistoryDB, contentValues);
-                        }
-                    } catch (JSONException e) {
-                        XLog.e("JSON: resolve json error");
-                        ContentValues contentValues = new ContentValues();
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LOCATION, mMarkName == null ? getResources().getString(R.string.history_location_default_name) : mMarkName);
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LOCATION, mMarkName);
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_WGS84, String.valueOf(latLng[0]));
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_WGS84, String.valueOf(latLng[1]));
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_TIMESTAMP, System.currentTimeMillis() / 1000);
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_CUSTOM, Double.toString(lng));
-                        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_CUSTOM, Double.toString(lat));
-                        DataBaseHistoryLocation.saveHistoryLocation(mLocationHistoryDB, contentValues);
-                    }
+            public void onGetReverseGeoCodeResult(ReverseGeoCodeResult reverseGeoCodeResult) {
+                String name;
+                if (reverseGeoCodeResult != null
+                        && reverseGeoCodeResult.error == SearchResult.ERRORNO.NO_ERROR
+                        && !TextUtils.isEmpty(reverseGeoCodeResult.getAddress())) {
+                    name = reverseGeoCodeResult.getAddress();
+                } else {
+                    XLog.e("HISTORY: reverse geocode failed, use fallback name");
+                    name = fallbackHistoryName();
                 }
+                insertHistoryRecord(name);
             }
         });
+    }
+
+    // 记录请求的位置信息
+    // 走 SDK 自带的逆地理编码（与地图共用同一个 AK），而不是「Web 服务 API」：
+    // 后者需要「服务端」类型的 AK，用 Android SDK 类型的 AK 调用会返回 240（APP 服务被禁用）。
+    private void recordCurrentLocation(double lng, double lat) {
+        //参数坐标系：bd09
+        mHistoryPendingLng = lng;
+        mHistoryPendingLat = lat;
+        double[] latLngWgs = MapUtils.bd2wgs(lng, lat);
+        mHistoryPendingLngWgs = latLngWgs[0];
+        mHistoryPendingLatWgs = latLngWgs[1];
+
+        mHistoryGeoCoder.reverseGeoCode(new ReverseGeoCodeOption().location(new LatLng(lat, lng)));
+    }
+
+    // 逆地理编码失败时的兜底名称：优先用已解析出的地名，否则用默认文案。
+    // 注意：不要把接口返回的错误信息当地名存进数据库（上游就是这么干的）。
+    private String fallbackHistoryName() {
+        return mMarkName != null ? mMarkName : getResources().getString(R.string.history_location_default_name);
+    }
+
+    // 把等待中的那条记录写入历史库
+    private void insertHistoryRecord(String name) {
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LOCATION, name);
+        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_WGS84, String.valueOf(mHistoryPendingLngWgs));
+        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_WGS84, String.valueOf(mHistoryPendingLatWgs));
+        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_TIMESTAMP, System.currentTimeMillis() / 1000);
+        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LONGITUDE_CUSTOM, String.valueOf(mHistoryPendingLng));
+        contentValues.put(DataBaseHistoryLocation.DB_COLUMN_LATITUDE_CUSTOM, String.valueOf(mHistoryPendingLat));
+        DataBaseHistoryLocation.saveHistoryLocation(mLocationHistoryDB, contentValues);
     }
 
     /*============================== SearchView 相关 ==============================*/

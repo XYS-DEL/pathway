@@ -115,7 +115,7 @@ A：Gradle 使用的 java 版本与 Android Studio 使用的不一致。Gradle �
 
 Q：地图不显示 / 定位无效？
 
-A：百度地图 AK 按「包名 + 签名 SHA1」绑定校验。请用 `com.iterlocus.pathway` 与你自己的 keystore SHA1 申请 AK，并填入 `local.properties` 的 `MAPS_API_KEY` / `MAPS_SAFE_CODE`。
+A：百度地图 AK 按「包名 + 签名 SHA1」绑定校验。请用 `com.iterlocus.pathway` 与你自己的 keystore SHA1 申请 AK，填入 `local.properties` 的 `MAPS_API_KEY` 即可。注意需要勾选地图 SDK 与定位 SDK 服务；`MAPS_SAFE_CODE` 目前代码中已无引用。
 
 ## 如何贡献
 
