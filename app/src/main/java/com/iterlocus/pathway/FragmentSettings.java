@@ -1,4 +1,4 @@
-package com.zcshou.gogogo;
+package com.iterlocus.pathway;
 
 import android.os.Bundle;
 import android.text.InputType;
@@ -11,7 +11,7 @@ import androidx.preference.SwitchPreferenceCompat;
 
 import com.baidu.mapapi.SDKInitializer;
 import com.elvishew.xlog.XLog;
-import com.zcshou.utils.GoUtils;
+import com.iterlocus.pathway.utils.GoUtils;
 
 import java.util.Objects;
 

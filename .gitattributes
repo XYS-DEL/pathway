@@ -1,0 +1,14 @@
+# 二进制文件不做行尾转换，避免 git 在 Windows 下误判并损坏它们
+*.jks      binary
+*.keystore binary
+*.jar      binary
+*.so       binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.webp     binary
+*.apk      binary
+*.aab      binary
+
+# 行尾策略交由 core.autocrlf 处理（Windows 上默认 true），
+# 因此这里不设置 * text=auto，以免对既有文件产生大规模重新归一化的 diff。

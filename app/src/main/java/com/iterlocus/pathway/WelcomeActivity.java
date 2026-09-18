@@ -1,4 +1,4 @@
-package com.zcshou.gogogo;
+package com.iterlocus.pathway;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -25,7 +25,7 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 
-import com.zcshou.utils.GoUtils;
+import com.iterlocus.pathway.utils.GoUtils;
 
 import java.util.ArrayList;
 

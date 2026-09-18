@@ -1,4 +1,4 @@
-package com.zcshou.service;
+package com.iterlocus.pathway.service;
 
 import android.annotation.SuppressLint;
 import android.app.Notification;
@@ -28,9 +28,9 @@ import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 
 import com.elvishew.xlog.XLog;
-import com.zcshou.gogogo.MainActivity;
-import com.zcshou.gogogo.R;
-import com.zcshou.joystick.JoyStick;
+import com.iterlocus.pathway.MainActivity;
+import com.iterlocus.pathway.R;
+import com.iterlocus.pathway.joystick.JoyStick;
 
 public class ServiceGo extends Service {
     // 定位相关变量

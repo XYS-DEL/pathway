@@ -1,4 +1,4 @@
-package com.zcshou.gogogo;
+package com.iterlocus.pathway;
 
 import org.junit.Test;
 

@@ -38,9 +38,10 @@ captures/
 .idea
 
 # Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# 签名密钥不进版本库：keystore 文件放在 keystore/ 下并保持未跟踪状态，
+# 密码等凭据写在 local.properties（同样已被忽略）。参见 app/build.gradle 的 signingProps。
+*.jks
+*.keystore
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

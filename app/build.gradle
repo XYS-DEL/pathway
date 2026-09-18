@@ -4,41 +4,49 @@ plugins {
     id "com.google.android.libraries.mapsplatform.secrets-gradle-plugin"
 }
 
+// 签名凭据从 local.properties 读取（该文件已被 .gitignore 忽略），
+// 避免把 keystore 与密码提交进版本库
+def signingProps = new Properties()
+def signingPropsFile = rootProject.file('local.properties')
+if (signingPropsFile.exists()) {
+    signingPropsFile.withInputStream { signingProps.load(it) }
+}
+def hasReleaseSigning = signingProps.getProperty('RELEASE_STORE_FILE') != null
+        && rootProject.file(signingProps.getProperty('RELEASE_STORE_FILE')).exists()
+
 android {
     ndkVersion = '26.2.11394342'
     compileSdk = 32
     buildToolsVersion = '36.0.0'
-    namespace = 'com.zcshou.gogogo'
+    namespace = 'com.iterlocus.pathway'
 
     signingConfigs {
-        debug {
-            storeFile file('..\\keystore\\GoGoGo.jks')
-            storePassword 'GoGoGo'
-            keyAlias 'GoGoKey'
-            keyPassword 'GoGoGo'
-        }
-        release {
-            storeFile file('..\\keystore\\GoGoGo.jks')
-            storePassword 'GoGoGo'
-            keyAlias 'GoGoKey'
-            keyPassword 'GoGoGo'
+        if (hasReleaseSigning) {
+            release {
+                storeFile rootProject.file(signingProps.getProperty('RELEASE_STORE_FILE'))
+                storePassword signingProps.getProperty('RELEASE_STORE_PASSWORD')
+                keyAlias signingProps.getProperty('RELEASE_KEY_ALIAS')
+                keyPassword signingProps.getProperty('RELEASE_KEY_PASSWORD')
+            }
         }
     }
 
     defaultConfig {
-        applicationId "com.zcshou.gogogo"
+        applicationId "com.iterlocus.pathway"
         minSdkVersion 27
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 32
-        versionCode 1123
-        versionName '1.12.3' // https://semver.org/lang/zh-CN/
+        versionCode 1
+        versionName '1.0.0' // https://semver.org/lang/zh-CN/
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resourceConfigurations += ['zh', 'zh-rCN', 'en', 'en-rUS']
         ndk {
             //noinspection ChromeOsAbiSupport
             abiFilters "arm64-v8a"
         }
-        signingConfig = signingConfigs.release
+        if (hasReleaseSigning) {
+            signingConfig = signingConfigs.release
+        }
     }
 
     buildTypes {
@@ -56,11 +64,18 @@ android {
             // R8 configuration files.
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
 
-            signingConfig = signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.release
+            }
             multiDexEnabled = true
         }
         debug {
-            signingConfig = signingConfigs.debug
+            // 有发布密钥时 debug 也用同一签名：百度地图 AK 绑定签名 SHA1，
+            // 统一签名可让一个 AK 同时覆盖 debug 与 release
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.release
+            }
+            // 否则回退到 AGP 自动生成的 ~/.android/debug.keystore
         }
     }
 
@@ -101,12 +116,23 @@ android {
             if (outputFile != null && outputFile.name.endsWith('.apk')) {
                 def fileName
                 if (variant.buildType.name == 'release') {
-                    fileName = "Go_${defaultConfig.versionName}_arm64-v8a_release.apk"
+                    fileName = "Pathway_${defaultConfig.versionName}_arm64-v8a_release.apk"
                 } else {
-                    fileName = "Go_${defaultConfig.versionName}_arm64-v8a_debug.apk"
+                    fileName = "Pathway_${defaultConfig.versionName}_arm64-v8a_debug.apk"
                 }
                 outputFileName=fileName
             }
+        }
+    }
+}
+
+// 缺少发布签名配置时明确失败，避免静默产出未签名的 release 包
+tasks.matching { it.name in ['assembleRelease', 'bundleRelease'] }.configureEach {
+    doFirst {
+        if (!hasReleaseSigning) {
+            throw new GradleException(
+                    '缺少发布签名配置：请在 local.properties 中填入 RELEASE_STORE_FILE、' +
+                            'RELEASE_STORE_PASSWORD、RELEASE_KEY_ALIAS、RELEASE_KEY_PASSWORD 后重试。')
         }
     }
 }

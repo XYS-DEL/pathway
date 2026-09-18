@@ -29,48 +29,40 @@ jobs:
         id: var
         run: echo "tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
 
-      # 创建 local.properties 文件
+      # 还原签名密钥：keystore 本身不进版本库，以 base64 存放在仓库 secret 中
+      - name: Restore signing keystore
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > keystore/release.jks
+
+      # 创建 local.properties：地图 KEY + 发布签名凭据
       - name: Create local.properties
         run: |
           cat << EOF > local.properties
           MAPS_API_KEY=${{ secrets.MAPS_API_KEY }}
           MAPS_SAFE_CODE=${{ secrets.MAPS_SAFE_CODE }}
+          RELEASE_STORE_FILE=keystore/release.jks
+          RELEASE_STORE_PASSWORD=${{ secrets.KEY_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS=${{ secrets.ALIAS }}
+          RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
           EOF
 
+      # 签名由 Gradle 依据 local.properties 完成（见 app/build.gradle），
+      # 因此不再需要独立的签名 Action
       - name: Build APK
         run: bash ./gradlew assembleRelease
 
-      - name: Get Build Tool Version
-        shell: bash
+      - name: Locate APK
         run: |
-          BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
-          echo "BUILD_TOOL_VERSION=$BUILD_TOOL_VERSION" >> $GITHUB_ENV
-          echo Last build tool version is: $BUILD_TOOL_VERSION
-
-      # https://github.com/marketplace/actions/sign-android-release
-      - name: Sign APK
-        id: sign_apk
-        uses: r0adkll/sign-android-release@v1
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOL_VERSION }}
-
-      - name: Get Signed APK Name
-        run: |
-          FULL_PATH=${{steps.sign_apk.outputs.signedReleaseFile}}
-          FILENAME=$(basename "$FULL_PATH")
-          echo "FILENAME=${FILENAME}" >> $GITHUB_ENV  # 存储到环境变量
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          echo "APK_PATH=${APK}" >> $GITHUB_ENV
+          echo "FILENAME=$(basename "$APK")" >> $GITHUB_ENV
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.FILENAME }}
-          path: ${{steps.sign_apk.outputs.signedReleaseFile}}
+          path: ${{ env.APK_PATH }}
 
       # https://github.com/marketplace/actions/auto-changelog
       # require commit format are "type(category): description [flag]"
@@ -110,4 +102,4 @@ jobs:
           token: ${{ github.token }}
           body: ${{ steps.changelog.outputs.changelog }}
           prerelease: false
-          files: ${{steps.sign_apk.outputs.signedReleaseFile}}
+          files: ${{ env.APK_PATH }}

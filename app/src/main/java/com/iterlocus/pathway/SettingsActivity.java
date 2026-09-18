@@ -1,4 +1,4 @@
-package com.zcshou.gogogo;
+package com.iterlocus.pathway;
 
 import android.os.Bundle;
 import android.view.MenuItem;

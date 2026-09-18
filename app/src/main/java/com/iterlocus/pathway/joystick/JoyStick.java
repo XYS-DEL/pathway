@@ -1,4 +1,4 @@
-package com.zcshou.joystick;
+package com.iterlocus.pathway.joystick;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -34,12 +34,12 @@ import com.baidu.mapapi.map.MyLocationData;
 import com.baidu.mapapi.model.LatLng;
 import com.baidu.mapapi.search.sug.SuggestionSearch;
 import com.baidu.mapapi.search.sug.SuggestionSearchOption;
-import com.zcshou.database.DataBaseHistoryLocation;
-import com.zcshou.gogogo.HistoryActivity;
-import com.zcshou.gogogo.MainActivity;
-import com.zcshou.gogogo.R;
-import com.zcshou.utils.GoUtils;
-import com.zcshou.utils.MapUtils;
+import com.iterlocus.pathway.database.DataBaseHistoryLocation;
+import com.iterlocus.pathway.HistoryActivity;
+import com.iterlocus.pathway.MainActivity;
+import com.iterlocus.pathway.R;
+import com.iterlocus.pathway.utils.GoUtils;
+import com.iterlocus.pathway.utils.MapUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

@@ -51,5 +51,7 @@ jobs:
         run: chmod +x gradlew
       
       # 启动构建
+      # 不含 assembleRelease：发布打包需要 local.properties 中的签名配置（见 app/build.gradle），
+      # 而签名密钥不进仓库。此处只校验编译、Lint 与单元测试。
       - name: Build with Gradle
-        run: ./gradlew build
+        run: ./gradlew assembleDebug lintDebug testDebugUnitTest

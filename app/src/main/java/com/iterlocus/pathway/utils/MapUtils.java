@@ -1,4 +1,4 @@
-package com.zcshou.utils;
+package com.iterlocus.pathway.utils;
 
 public class MapUtils {
 //    public final static String COORDINATE_TYPE_GCJ02 = "gcj02";

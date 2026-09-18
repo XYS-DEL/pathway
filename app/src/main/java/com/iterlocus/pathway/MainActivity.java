@@ -1,4 +1,4 @@
-package com.zcshou.gogogo;
+package com.iterlocus.pathway;
 
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
@@ -91,12 +91,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.zcshou.service.ServiceGo;
-import com.zcshou.database.DataBaseHistoryLocation;
-import com.zcshou.database.DataBaseHistorySearch;
-import com.zcshou.utils.ShareUtils;
-import com.zcshou.utils.GoUtils;
-import com.zcshou.utils.MapUtils;
+import com.iterlocus.pathway.service.ServiceGo;
+import com.iterlocus.pathway.database.DataBaseHistoryLocation;
+import com.iterlocus.pathway.database.DataBaseHistorySearch;
+import com.iterlocus.pathway.utils.ShareUtils;
+import com.iterlocus.pathway.utils.GoUtils;
+import com.iterlocus.pathway.utils.MapUtils;
 
 import com.elvishew.xlog.XLog;
 
@@ -436,9 +436,13 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                 File file = new File(getExternalFilesDir("Logs"), GoApplication.LOG_FILE_NAME);
                 ShareUtils.shareFile(this, file, item.getTitle().toString());
             } else if (id == R.id.nav_contact) {
-                Uri uri = Uri.parse("https://gitee.com/itexp/gogogo/issues");
-                Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-                startActivity(intent);
+                if (AppConfig.FEEDBACK_URL.isEmpty()) {
+                    GoUtils.DisplayToast(this, getResources().getString(R.string.feedback_disabled));
+                } else {
+                    Uri uri = Uri.parse(AppConfig.FEEDBACK_URL);
+                    Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                    startActivity(intent);
+                }
             }
 
             DrawerLayout drawer = findViewById(R.id.drawer_layout);
@@ -650,7 +654,9 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
         //可选，默认false，设置是否需要POI结果，可以在BDLocation.getPoiList里得到
         locationOption.setIsNeedLocationPoiList(false);
         //可选，默认false，设置是否收集CRASH信息，默认收集
-        locationOption.setIgnoreCacheException(true);
+        //注意：百度 SDK 中该方法名首字母为大写（SetIgnoreCacheException），
+        //上游 commit 161eb7c 误当作拼写错误改成小写，导致 master 无法编译，此处改回。
+        locationOption.SetIgnoreCacheException(true);
         //可选，默认false，设置是否开启Gps定位
         //locationOption.setOpenGps(true);
         locationOption.setOpenGnss(true);
@@ -1164,7 +1170,14 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
     }
 
     private void checkUpdateVersion(boolean result) {
-        String mapApiUrl = "https://api.github.com/repos/zcshou/gogogo/releases/latest";
+        if (!AppConfig.UPDATE_CHECK_ENABLED || AppConfig.UPDATE_API_URL.isEmpty()) {
+            if (result) {
+                GoUtils.DisplayToast(this, getResources().getString(R.string.update_disabled));
+            }
+            return;
+        }
+
+        String mapApiUrl = AppConfig.UPDATE_API_URL;
 
         okhttp3.Request request = new okhttp3.Request.Builder().url(mapApiUrl).get().build();
         final Call call = mOkHttpClient.newCall(request);

@@ -1,4 +1,4 @@
-package com.zcshou.utils;
+package com.iterlocus.pathway.utils;
 
 import android.content.Context;
 import android.content.Intent;
