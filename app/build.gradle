@@ -4,6 +4,14 @@ plugins {
     id "com.google.android.libraries.mapsplatform.secrets-gradle-plugin"
 }
 
+// secrets 插件默认会把 local.properties 里的所有键都生成为 BuildConfig 常量。
+// 签名凭据只供 Gradle 构建期使用，绝不能进 BuildConfig：debug 包不做混淆，
+// 密码会以明文留在 APK 里（release 包只是侥幸被 R8 剥离，不应依赖这一点）。
+// 注意：下面的签名配置是直接读 local.properties 的，与本插件无关，屏蔽后不受影响。
+secrets {
+    ignoreList.add("RELEASE_.*")
+}
+
 // 签名凭据从 local.properties 读取（该文件已被 .gitignore 忽略），
 // 避免把 keystore 与密码提交进版本库
 def signingProps = new Properties()
