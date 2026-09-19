@@ -5,12 +5,10 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.MenuItem;
 import android.view.View;
-import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RadioGroup;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
@@ -53,9 +51,8 @@ public class RouteDrawActivity extends BaseActivity {
     private BaiduMap mBaiduMap;
     private RouteDrawOverlayView mOverlay;
 
-    private ScrollView mToolsPanel;
     private TextView mStatusText;
-    private Button mUndoButton;
+    private TextView mUndoButton;
 
     private SQLiteDatabase mRouteDb;
 
@@ -102,11 +99,11 @@ public class RouteDrawActivity extends BaseActivity {
         mOverlay.setBaiduMap(mBaiduMap);
         mOverlay.setOnRouteChangedListener(this::onRouteChanged);
 
-        mToolsPanel = findViewById(R.id.route_draw_tools);
         mStatusText = findViewById(R.id.route_draw_status);
         mUndoButton = findViewById(R.id.route_draw_btn_undo);
 
         findViewById(R.id.route_draw_tools_toggle).setOnClickListener(v -> toggleToolsPanel());
+        applyToolsCollapsed(false);
 
         RadioGroup modeGroup = findViewById(R.id.route_draw_mode_group);
         modeGroup.setOnCheckedChangeListener((group, checkedId) -> {
@@ -175,9 +172,35 @@ public class RouteDrawActivity extends BaseActivity {
         }
     }
 
+    /**
+     * 折叠/展开工具条。箭头片常驻，其余片随之一并隐藏。
+     *
+     * <p>箭头方向即「点了会往哪边动」：展开时指左（收起），收起时指右（展开）。
+     *
+     * <p>折叠状态从模式片的可见性反推：工具条根布局就是那片 LinearLayout 本身，
+     * 不再为它单独留一个字段（多一份状态就多一处可能不同步的地方）。
+     */
     private void toggleToolsPanel() {
-        boolean visible = mToolsPanel.getVisibility() == View.VISIBLE;
-        mToolsPanel.setVisibility(visible ? View.GONE : View.VISIBLE);
+        boolean collapsed = findViewById(R.id.route_draw_mode_group).getVisibility() != View.VISIBLE;
+        applyToolsCollapsed(!collapsed);
+    }
+
+    private void applyToolsCollapsed(boolean collapsed) {
+        int visibility = collapsed ? View.GONE : View.VISIBLE;
+        findViewById(R.id.route_draw_mode_group).setVisibility(visibility);
+        findViewById(R.id.route_draw_lock_map).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_densify).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_undo).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_clear).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_finish).setVisibility(visibility);
+
+        TextView toggle = findViewById(R.id.route_draw_tools_toggle);
+        toggle.setText(collapsed
+                ? R.string.route_draw_arrow_expand
+                : R.string.route_draw_arrow_collapse);
+        toggle.setContentDescription(getResources().getString(collapsed
+                ? R.string.route_draw_tools_expand
+                : R.string.route_draw_tools_collapse));
     }
 
     private void onRouteChanged() {
