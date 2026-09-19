@@ -1400,6 +1400,7 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
     <string name="route_draw_status_idle">点绘制：点击地图落点；回到起点可闭合</string>
     <string name="route_draw_status_line">线绘制：按住拖动描绘；松手时靠近起点可闭合</string>
     <string name="route_draw_point_count">已绘制 %1$d 个点</string>
+    <string name="route_draw_locate_failed">定位失败，请解锁地图后手动平移到目标区域</string>
 ```
 
 - [ ] **Step 2: 写布局**
@@ -1552,6 +1553,10 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
 
+import com.baidu.location.BDAbstractLocationListener;
+import com.baidu.location.BDLocation;
+import com.baidu.location.LocationClient;
+import com.baidu.location.LocationClientOption;
 import com.baidu.mapapi.map.BaiduMap;
 import com.baidu.mapapi.map.MapStatus;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
@@ -1580,6 +1585,9 @@ public class RouteDrawActivity extends BaseActivity {
     private Button mUndoButton;
 
     private SQLiteDatabase mRouteDb;
+
+    /** 只在进入界面时取一次位置，把地图居中；拿到就停。 */
+    private LocationClient mLocClient;
 
     /** 撤销栈：每次「落点 / 完成一次拖绘 / 闭合 / 密化」压一份点集+闭合标记的快照。 */
     private final List<Snapshot> mUndoStack = new ArrayList<>();
@@ -1644,6 +1652,9 @@ public class RouteDrawActivity extends BaseActivity {
         // 默认锁定：进入就能直接画
         applyMapGestures(true);
         mOverlay.setDrawEnabled(true);
+
+        centerOnCurrentLocation();
+
         updateStatusText();
         updateUndoButton();
     }
@@ -1662,6 +1673,7 @@ public class RouteDrawActivity extends BaseActivity {
 
     @Override
     protected void onDestroy() {
+        stopLocationClient();
         mMapView.onDestroy();
         if (mRouteDb != null) {
             mRouteDb.close();
@@ -1705,6 +1717,67 @@ public class RouteDrawActivity extends BaseActivity {
     private void updateUndoButton() {
         if (mUndoButton != null) {
             mUndoButton.setEnabled(!mUndoStack.isEmpty());
+        }
+    }
+
+    /**
+     * 取一次当前位置把地图居中，省得每次进来都要手动平移。
+     *
+     * <p>这里刻意用 {@code setScanSpan(0)}（只定位一次），与 MainActivity 的
+     * 1000ms 持续定位是两种不同配置——不要因为「看着像」就把 MainActivity 的
+     * getLocationClientOption() 抄过来，那既多余又会被审查判为复制逻辑块。
+     *
+     * <p>定位失败不拦路：停在默认中心，提示用户手动平移。
+     */
+    private void centerOnCurrentLocation() {
+        try {
+            mLocClient = new LocationClient(getApplicationContext());
+            mLocClient.registerLocationListener(new BDAbstractLocationListener() {
+                @Override
+                public void onReceiveLocation(BDLocation bdLocation) {
+                    if (bdLocation == null || mBaiduMap == null) {
+                        return;
+                    }
+                    int locType = bdLocation.getLocType();
+                    if (locType == BDLocation.TypeCriteriaException
+                            || locType == BDLocation.TypeNetWorkException) {
+                        GoUtils.DisplayToast(RouteDrawActivity.this,
+                                getResources().getString(R.string.route_draw_locate_failed));
+                        stopLocationClient();
+                        return;
+                    }
+
+                    mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newMapStatus(
+                            new MapStatus.Builder()
+                                    .target(new LatLng(bdLocation.getLatitude(),
+                                            bdLocation.getLongitude()))
+                                    .zoom(18.0f)
+                                    .build()));
+                    stopLocationClient();
+                }
+            });
+
+            LocationClientOption option = new LocationClientOption();
+            // 必须与地图一致：本项目地图用的是 BD09LL（见 CLAUDE.md 的坐标系一节）
+            option.setCoorType("bd09ll");
+            // 0 = 只定位一次。绘制界面只要一个初始中心，不需要持续定位
+            option.setScanSpan(0);
+            option.setOpenGnss(true);
+            option.setIsNeedAddress(false);
+            option.setIsNeedLocationDescribe(false);
+            option.setIsNeedLocationPoiList(false);
+
+            mLocClient.setLocOption(option);
+            mLocClient.start();
+        } catch (Exception e) {
+            XLog.e("ROUTE: ERROR - centerOnCurrentLocation");
+        }
+    }
+
+    private void stopLocationClient() {
+        if (mLocClient != null) {
+            mLocClient.stop();
+            mLocClient = null;
         }
     }
 
@@ -2066,7 +2139,7 @@ git commit -m "feat: 绘制路线入口接线，并补文档"
 
 - `./gradlew assembleDebug lintDebug testDebugUnitTest` 全绿
 - `RouteGeometryTest` 21 个用例、`RouteNameValidatorTest` 8 个用例全过
-- 装机后可：进入绘制界面 → 锁定地图 → 点绘/线绘 → 闭合 → 密化 → 保存 → 再打开保存弹框能看到刚存的名称
+- 装机后可：进入绘制界面 → **地图自动居中到当前位置**（定位失败则提示手动平移）→ 锁定地图 → 点绘/线绘 → 闭合 → 密化 → 保存 → 再打开保存弹框能看到刚存的名称
 - 重名保存被拒并提示换名；非法名称（空、超长、含 `/` 或换行）被拒并提示具体原因
 
 ## 明确不做
