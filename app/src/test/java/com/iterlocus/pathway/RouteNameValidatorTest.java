@@ -53,6 +53,15 @@ public class RouteNameValidatorTest {
     }
 
     @Test
+    public void forbiddenCharsMatchesSpec() {
+        // 字面钉死常量本身：增删成员或调换顺序都会失败。
+        // 单独看下面的 rejectsEveryForbiddenCharacter 是对该常量的同义反复——
+        // 断言集合取自被测常量，改坏常量它照样绿。两者合起来才成立：
+        // 这里保证常量就是这 9 个字符，那里保证实现确实按该常量拒绝。
+        assertEquals("/\\:*?\"<>|", RouteNameValidator.FORBIDDEN_CHARS);
+    }
+
+    @Test
     public void rejectsEveryForbiddenCharacter() {
         for (char c : RouteNameValidator.FORBIDDEN_CHARS.toCharArray()) {
             assertEquals("应拒绝字符: " + c,
