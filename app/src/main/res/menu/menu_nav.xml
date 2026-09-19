@@ -12,6 +12,10 @@
             android:id="@+id/nav_nfc_card"
             android:icon="@drawable/ic_menu_nfc"
             android:title="@string/nav_menu_nfc_card" />
+        <item
+            android:id="@+id/nav_route_draw"
+            android:icon="@drawable/ic_menu_nfc"
+            android:title="@string/nav_menu_route_draw" />
     </group>
     
     <group>

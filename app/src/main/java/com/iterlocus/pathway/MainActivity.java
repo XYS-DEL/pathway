@@ -431,6 +431,10 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                 Intent intent = new Intent(MainActivity.this, NfcCardActivity.class);
 
                 startActivity(intent);
+            } else if (id == R.id.nav_route_draw) {
+                Intent intent = new Intent(MainActivity.this, RouteDrawActivity.class);
+
+                startActivity(intent);
             } else if (id == R.id.nav_settings) {
                 Intent intent = new Intent(MainActivity.this, SettingsActivity.class);
                 startActivity(intent);

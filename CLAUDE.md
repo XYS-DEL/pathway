@@ -119,7 +119,9 @@ A custom overlay `View` added to the `WindowManager` (not part of any activity l
 
 ### Persistence
 
-Two independent `SQLiteOpenHelper`s, `HistoryLocation.db` and `HistorySearch.db`, both `DB_VERSION = 1` with a destructive `onUpgrade` (drop + recreate). Save helpers are `static` and dedupe by deleting matching rows before inserting (location keyed on WGS84 lng/lat, search keyed on the query string). `HistoryActivity` can apply a random offset (meters → degrees, ±`setting_lat_max_offset` / `setting_lon_max_offset`) when a history entry is tapped.
+Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the original two), plus `RouteConfig.db` for drawn routes. All are `DB_VERSION = 1` with a destructive `onUpgrade` (drop + recreate). Save helpers are `static`. The two **history** helpers dedupe by deleting matching rows before inserting (location keyed on WGS84 lng/lat, search keyed on the query string); **`DataBaseRoute` deliberately does the opposite** — it refuses a duplicate name and returns `-1` and never overwrites, because a hand-drawn route is expensive to reproduce and silently replacing it would be data loss. Its `COLLATE NOCASE UNIQUE` column is the enforcement, not a hint to delete-then-insert. `HistoryActivity` can apply a random offset (meters → degrees, ±`setting_lat_max_offset` / `setting_lon_max_offset`) when a history entry is tapped.
+
+**DDL error handling is the one deliberate exception to "log and degrade".** Runtime data paths (`query`/`insert`/encode/decode) must log via `XLog.e` and return a safe value rather than throw — that is the project-wide convention. `onCreate`/`onUpgrade` instead **log and rethrow**: a malformed `CREATE TABLE` is a programming error, not a runtime read/write failure, and swallowing it leaves a table-less database whose every later save fails silently and permanently. `DataBaseRoute` implements this shape; the two older helpers still have unguarded `onCreate`/`onUpgrade`, so the `database` package currently carries two idioms — follow `DataBaseRoute`.
 
 ### Preferences
 
@@ -128,6 +130,27 @@ Two independent `SQLiteOpenHelper`s, `HistoryLocation.db` and `HistorySearch.db`
 ### Logging
 
 `XLog` (initialized in `GoApplication`) writes to `<externalFilesDir>/Logs/Pathway.log` (the filename comes from the `APP_NAME` constant), console + file, 3-day retention, level `ALL`.
+
+### 绘制路线
+
+`RouteDrawActivity` 在百度地图上画路线：点绘制（点击落点）与线绘制（按住拖动采样）两种模式，
+可闭合（两种模式都支持，点数不足 2 时拒绝），可按总长等距密化（「密化」按钮弹框输入**加点数 N**，
+总长等分 N+1 段），保存进 `RouteConfig.db` 的 `RouteConfig` 表。
+
+- **`RouteGeometry` 与 `RouteNameValidator` 是纯逻辑**，不依赖 Android，可在普通 JVM 单元测试里跑。
+  几何计算刻意收 `int` 像素而不是 `android.graphics.Point`——碰 Android 类会抛 "not mocked"。
+- **存的坐标是 BD09**（地图原生）。后续线路模拟调用时必须逐个 `MapUtils.bd2wgs()` 转 WGS84
+  再喂给 `ServiceGo`，因为 `setTestProviderLocation` 要的是 WGS84。注意 `MapUtils` 入参是
+  **(经度, 纬度)**，而 `LatLng` 构造是 **(纬度, 经度)**。
+- **同名路线拒绝写入**，不覆盖、不自动改名；名称先过 `RouteNameValidator`（trim、1–32 字符、
+  禁控制字符、禁 `/\:*?"<>|`）。数据库列另有 `COLLATE NOCASE UNIQUE` 兜底。
+- 地图手势与绘制手势靠工具面板的「锁定地图」互斥：锁定时 `setAllGesturesEnabled(false)`
+  且绘制层消费触摸，解锁后相反。
+- `RouteDrawActivity` 含 `MapView`，必须转发 `onResume`/`onPause`/`onDestroy`；
+  且保持默认启动模式。
+- **`RouteDrawActivity` 锁竖屏**（manifest 的 `screenOrientation="portrait"`）：它持有 `MapView`、
+  GL 覆盖层与一次性定位客户端，旋转会重建 Activity，把用户正在画的那条路线连同撤销栈一起丢掉。
+  代价是画不了横屏——若日后要放开，应先做点集持久化，而不是直接删掉这行。
 
 ### NFC 位置卡
 

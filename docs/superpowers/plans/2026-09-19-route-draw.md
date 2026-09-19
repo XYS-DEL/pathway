@@ -14,7 +14,8 @@
 
 - 包根 `com.iterlocus.pathway`；Activity 放根包，SQLite 助手放 `com.iterlocus.pathway.database`。
 - 注释与提交信息用中文；用户可见文案进 `res/values/strings.xml`，沿用 `app_*` 前缀。
-- 出错记 `XLog.e("ROUTE: ERROR - <method>")` 并降级，**不抛异常、不崩溃**。
+- 出错记 `XLog.e("ROUTE: ERROR - <method>")` 并降级，**不抛异常、不崩溃**。此约束作用于**运行时数据路径**（查询、插入、编解码）。
+  **DDL 例外**：`onCreate`/`onUpgrade` 建表失败时，记日志后**照抛**——建表失败是编程错误而非运行时读写失败（spec 的错误处理表只覆盖「数据库读写失败」），静默吞掉会让此后每次保存都无声失败，比崩更难查。详见 `DataBaseRoute` 的实现与 `CLAUDE.md`。
 - 路线坐标一律 **BD09**（地图原生）。模拟侧调用时才转 WGS84。
 - `MapUtils` 入参顺序是 **(经度, 纬度)**；`LatLng` 构造是 **(纬度, 经度)**。写反偏 500 米且不报错。
 - 「密化」的 N 是**新增点数量**，不是分段数：总长等分 N+1 段。
@@ -365,7 +366,7 @@ git commit -m "feat: 路线几何——测地距离与折线弧长"
 
 - [ ] **Step 1: 追加失败的测试**
 
-在 `RouteGeometryTest` 顶部补 `import static org.junit.Assert.assertFalse;` 与 `import static org.junit.Assert.assertTrue;`，然后追加：
+在 `RouteGeometryTest` 顶部补 `import static org.junit.Assert.assertTrue;`（**只补这一个**——`assertFalse` 是 Task 4 才用到的，提前加会留下一个未使用 import），然后追加：
 
 ```java
     @Test
@@ -600,6 +601,25 @@ git commit -m "feat: 路线按总长等距密化"
         assertTrue(RouteGeometry.shouldSample(new LatLng(0, 0), new LatLng(0, 0.001),
                 RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
     }
+
+    @Test
+    public void samplingThresholdValueAndOperatorArePinned() {
+        LatLng origin = new LatLng(0, 0);
+
+        // 恰好等于阈值：钉住 >= 而不是 >。阈值由 distanceMeters 现算，避免浮点字面量；
+        // 期望值 true 是独立可知的（"≥" 在等号处为真），不是拿被测代码当期望。
+        LatLng atThreshold = new LatLng(0, 2.0 / 111195.0);
+        assertTrue(RouteGeometry.shouldSample(origin, atThreshold,
+                RouteGeometry.distanceMeters(origin, atThreshold)));
+
+        // 收紧夹逼：赤道上 1.5e-5 度 ≈ 1.67 米（应丢弃）、2.5e-5 度 ≈ 2.78 米（应保留）。
+        // 这两条把 LINE_SAMPLE_MIN_DISTANCE_METERS 锁进 (1.67, 2.78]，取 1.0 或 3.0 都会失败——
+        // 上面两条只夹到 (0.111, 111.195]，50 和 100 都能蒙混过关。
+        assertFalse(RouteGeometry.shouldSample(origin, new LatLng(0, 1.5e-5),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+        assertTrue(RouteGeometry.shouldSample(origin, new LatLng(0, 2.5e-5),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+    }
 ```
 
 - [ ] **Step 2: 运行,确认失败**（`找不到符号: 方法 canClose`）
@@ -770,13 +790,26 @@ public class DataBaseRoute extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        db.execSQL(CREATE_TABLE);
+        try {
+            db.execSQL(CREATE_TABLE);
+        } catch (RuntimeException e) {
+            /* 建表失败是编程错误（DDL 写坏了），不是运行时读写失败。
+             * spec 的错误处理表只覆盖后者。吞掉会让数据库没有表、此后每次保存都无声失败，
+             * 对用户是永久且无法解释的；记日志后照抛，让它在开发者第一次实测时立刻暴露。 */
+            XLog.e("ROUTE: ERROR - onCreate");
+            throw e;
+        }
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
-        onCreate(db);
+        try {
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
+            onCreate(db);
+        } catch (RuntimeException e) {
+            XLog.e("ROUTE: ERROR - onUpgrade");
+            throw e;
+        }
     }
 
     /** 名称是否已被占用（大小写不敏感，与列的 COLLATE NOCASE 一致）。 */
@@ -1042,7 +1075,10 @@ public class RouteDrawOverlayView extends View {
         mStrokePaint.setStyle(Paint.Style.STROKE);
         mStrokePaint.setStrokeWidth(mLineWidthPx);
         mStrokePaint.setStrokeCap(Paint.Cap.ROUND);
-        mStrokePaint.setColor(Color.parseColor("#99FF3F51B5"));
+        // 注意：Color.parseColor 只接受 #RRGGBB 或 #AARRGGBB 两种长度。
+        // 原稿写成 "#99FF3F51B5"（10 位，alpha 写了两遍），运行期抛 Unknown color，
+        // 界面一打开就闪退——编译期查不出来。
+        mStrokePaint.setColor(Color.parseColor("#993F51B5"));
     }
 
     public void setOnRouteChangedListener(OnRouteChangedListener listener) {
@@ -1081,6 +1117,8 @@ public class RouteDrawOverlayView extends View {
     public void setDrawMode(int mode) {
         mMode = mode;
         mStroke.clear();
+        // 作废进行中的手势：否则手指仍按着时，下一次 MOVE 会在空笔画上重新播种一段幽灵轨迹
+        mTouching = false;
         invalidate();
     }
 
@@ -1124,6 +1162,8 @@ public class RouteDrawOverlayView extends View {
         mPoints.clear();
         mStroke.clear();
         mClosed = false;
+        // 同 setDrawMode：清空笔画必须一并作废手势
+        mTouching = false;
         invalidate();
     }
 
@@ -1164,6 +1204,11 @@ public class RouteDrawOverlayView extends View {
                 return true;
 
             case MotionEvent.ACTION_MOVE:
+                // 没有进行中的手势就忽略：setDrawMode/clearRoute 会在手指仍按着时清空笔画，
+                // 不设这道守卫，下一次 MOVE 会用 shouldSample(null,...) 恒真从空笔画里播种出一段幽灵轨迹
+                if (!mTouching) {
+                    return true;
+                }
                 if (mMode == MODE_LINE) {
                     extendStroke();
                 }
@@ -1171,6 +1216,9 @@ public class RouteDrawOverlayView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                if (!mTouching) {
+                    return true;
+                }
                 mTouching = false;
                 if (mMode == MODE_POINT) {
                     handlePointTap(event.getX(), event.getY());
@@ -1356,8 +1404,8 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
 - Modify: `app/src/main/res/values/strings.xml`
 
 **Interfaces:**
-- Produces: `RouteDrawActivity`，含字段 `mOverlay`、`mBaiduMap`、`mRouteDb`、`mStroke`(撤销栈)
-- 供 Task 8 使用的内部方法名：`applyMapGestures(boolean locked)`、`pushUndoSnapshot()`、`popUndoSnapshot()`
+- Produces: `RouteDrawActivity`，含字段 `mMapView`、`mBaiduMap`、`mOverlay`、`mRouteDb`、`mLocClient`、`mUndoStack`（撤销栈；早先此处误写成 `mStroke`，那是绘制层内部的字段名，与本类无关）
+- 供 Task 8 使用的内部方法名：`applyMapGestures(boolean locked)`、`pushUndoSnapshot()`、`updateStatusText()`、`updateUndoButton()`。（Task 8 的 `undo()` 直接操作 `mUndoStack`，**不另设** `popUndoSnapshot()`——早先的 Interfaces 块误列过这个名字，实现里从不存在。）
 
 - [ ] **Step 1: 加字符串**
 
@@ -1400,6 +1448,7 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
     <string name="route_draw_status_idle">点绘制：点击地图落点；回到起点可闭合</string>
     <string name="route_draw_status_line">线绘制：按住拖动描绘；松手时靠近起点可闭合</string>
     <string name="route_draw_point_count">已绘制 %1$d 个点</string>
+    <string name="route_draw_locate_failed">定位失败，请解锁地图后手动平移到目标区域</string>
 ```
 
 - [ ] **Step 2: 写布局**
@@ -1423,12 +1472,14 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 面板收起时的入口 -->
+    <!-- 面板收起时的入口。
+         刻意放在 start|top：面板是 end 侧、match_parent 高、且在子视图列表里更靠后，
+         会盖住 end 侧的一切——放 end|top 的话面板一打开，收起按钮就被自己盖住，关不掉。 -->
     <Button
         android:id="@+id/route_draw_tools_toggle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|top"
+        android:layout_gravity="start|top"
         android:layout_margin="12dp"
         android:text="@string/route_draw_tools_toggle" />
 
@@ -1552,6 +1603,10 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
 
+import com.baidu.location.BDAbstractLocationListener;
+import com.baidu.location.BDLocation;
+import com.baidu.location.LocationClient;
+import com.baidu.location.LocationClientOption;
 import com.baidu.mapapi.map.BaiduMap;
 import com.baidu.mapapi.map.MapStatus;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
@@ -1580,6 +1635,9 @@ public class RouteDrawActivity extends BaseActivity {
     private Button mUndoButton;
 
     private SQLiteDatabase mRouteDb;
+
+    /** 只在进入界面时取一次位置，把地图居中；拿到就停。 */
+    private LocationClient mLocClient;
 
     /** 撤销栈：每次「落点 / 完成一次拖绘 / 闭合 / 密化」压一份点集+闭合标记的快照。 */
     private final List<Snapshot> mUndoStack = new ArrayList<>();
@@ -1644,6 +1702,9 @@ public class RouteDrawActivity extends BaseActivity {
         // 默认锁定：进入就能直接画
         applyMapGestures(true);
         mOverlay.setDrawEnabled(true);
+
+        centerOnCurrentLocation();
+
         updateStatusText();
         updateUndoButton();
     }
@@ -1662,6 +1723,7 @@ public class RouteDrawActivity extends BaseActivity {
 
     @Override
     protected void onDestroy() {
+        stopLocationClient();
         mMapView.onDestroy();
         if (mRouteDb != null) {
             mRouteDb.close();
@@ -1705,6 +1767,85 @@ public class RouteDrawActivity extends BaseActivity {
     private void updateUndoButton() {
         if (mUndoButton != null) {
             mUndoButton.setEnabled(!mUndoStack.isEmpty());
+        }
+    }
+
+    /**
+     * 百度定位的失败码远多于成功码（TypeNone、TypeCriteriaException、TypeNetWorkException、
+     * TypeOffLineLocationFail、TypeServerError 等十余个），所以判定必须走**成功白名单**。
+     *
+     * <p>反过来的写法（白名单两三个失败码、其余当成功）会让绝大多数失败落到
+     * {@code animateMapStatus} 上：失败的 BDLocation 经纬度常为 0，相机会飞到几内亚湾，
+     * 而且不弹任何提示——用户只看到地图莫名跑到海上。
+     *
+     * <p>注意 {@code TypeGpsLocation} 与 {@code TypeGnssLocation} 的取值都是 61（javap 核实），
+     * 那个 {@code ||} 项在数值上冗余；保留两个名字是为了表意，不要以为这里写错了。
+     */
+    private static boolean isLocateSuccess(int locType) {
+        return locType == BDLocation.TypeGpsLocation
+                || locType == BDLocation.TypeGnssLocation
+                || locType == BDLocation.TypeNetWorkLocation
+                || locType == BDLocation.TypeCoarseLocation
+                || locType == BDLocation.TypeOffLineLocation
+                || locType == BDLocation.TypeCacheLocation;
+    }
+
+    /**
+     * 取一次当前位置把地图居中，省得每次进来都要手动平移。
+     *
+     * <p>这里刻意用 {@code setScanSpan(0)}（只定位一次），与 MainActivity 的
+     * 1000ms 持续定位是两种不同配置——不要因为「看着像」就把 MainActivity 的
+     * getLocationClientOption() 抄过来，那既多余又会被审查判为复制逻辑块。
+     *
+     * <p>定位失败不拦路：停在默认中心，提示用户手动平移。
+     */
+    private void centerOnCurrentLocation() {
+        try {
+            mLocClient = new LocationClient(getApplicationContext());
+            mLocClient.registerLocationListener(new BDAbstractLocationListener() {
+                @Override
+                public void onReceiveLocation(BDLocation bdLocation) {
+                    if (bdLocation == null || mBaiduMap == null) {
+                        return;
+                    }
+                    if (!isLocateSuccess(bdLocation.getLocType())) {
+                        GoUtils.DisplayToast(RouteDrawActivity.this,
+                                getResources().getString(R.string.route_draw_locate_failed));
+                        stopLocationClient();
+                        return;
+                    }
+
+                    mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newMapStatus(
+                            new MapStatus.Builder()
+                                    .target(new LatLng(bdLocation.getLatitude(),
+                                            bdLocation.getLongitude()))
+                                    .zoom(18.0f)
+                                    .build()));
+                    stopLocationClient();
+                }
+            });
+
+            LocationClientOption option = new LocationClientOption();
+            // 必须与地图一致：本项目地图用的是 BD09LL（见 CLAUDE.md 的坐标系一节）
+            option.setCoorType("bd09ll");
+            // 0 = 只定位一次。绘制界面只要一个初始中心，不需要持续定位
+            option.setScanSpan(0);
+            option.setOpenGnss(true);
+            option.setIsNeedAddress(false);
+            option.setIsNeedLocationDescribe(false);
+            option.setIsNeedLocationPoiList(false);
+
+            mLocClient.setLocOption(option);
+            mLocClient.start();
+        } catch (Exception e) {
+            XLog.e("ROUTE: ERROR - centerOnCurrentLocation");
+        }
+    }
+
+    private void stopLocationClient() {
+        if (mLocClient != null) {
+            mLocClient.stop();
+            mLocClient = null;
         }
     }
 
@@ -1991,10 +2132,15 @@ git commit -m "feat: 绘制路线的密化、撤销、清空与保存"
 在 `AndroidManifest.xml` 的 `.NfcCardActivity` 之后插入：
 
 ```xml
+        <!-- 锁定竖屏：本界面持有 MapView、GL 覆盖层、一次性定位客户端，
+             以及用户正在画的那条路线。旋转会重建 Activity，把整条绘制连同撤销栈一起丢掉，
+             而 onSaveInstanceState 只能救点集、救不了 MapView 与 GL 上下文。
+             代价是失去横屏作画的空间——若日后要做横屏，应改为持久化点集而非直接解锁。 -->
         <activity
             android:name=".RouteDrawActivity"
             android:label="@string/app_route_draw"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 ```
 
 - [ ] **Step 2: 加侧滑入口**
@@ -2065,8 +2211,8 @@ git commit -m "feat: 绘制路线入口接线，并补文档"
 ## 完成标准
 
 - `./gradlew assembleDebug lintDebug testDebugUnitTest` 全绿
-- `RouteGeometryTest` 21 个用例、`RouteNameValidatorTest` 8 个用例全过
-- 装机后可：进入绘制界面 → 锁定地图 → 点绘/线绘 → 闭合 → 密化 → 保存 → 再打开保存弹框能看到刚存的名称
+- `RouteGeometryTest` 22 个用例、`RouteNameValidatorTest` 9 个用例全过
+- 装机后可：进入绘制界面 → **地图自动居中到当前位置**（定位失败则提示手动平移）→ 锁定地图 → 点绘/线绘 → 闭合 → 密化 → 保存 → 再打开保存弹框能看到刚存的名称
 - 重名保存被拒并提示换名；非法名称（空、超长、含 `/` 或换行）被拒并提示具体原因
 
 ## 明确不做
