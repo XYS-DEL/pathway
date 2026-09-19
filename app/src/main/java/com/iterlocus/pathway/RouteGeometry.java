@@ -21,6 +21,9 @@ public final class RouteGeometry {
     /** 闭合所需的最少点数。 */
     public static final int MIN_POINTS_FOR_CLOSE = 2;
 
+    /** 线绘制时相邻采样点的最小间距（米）。低于它的移动被忽略，避免一次拖动画出上千个重合点。 */
+    public static final double LINE_SAMPLE_MIN_DISTANCE_METERS = 2.0;
+
     private RouteGeometry() {
     }
 
@@ -120,6 +123,32 @@ public final class RouteGeometry {
             result.add(new LatLng(entry[1], entry[2]));
         }
         return result;
+    }
+
+    /** 点数是否达到可闭合的下限。 */
+    public static boolean canClose(int pointCount) {
+        return pointCount >= MIN_POINTS_FOR_CLOSE;
+    }
+
+    /**
+     * 屏幕落点是否落在锚点的命中半径内（欧氏距离，不是轴距）。
+     *
+     * <p>刻意收 int 像素而不是 {@code android.graphics.Point}：本类要能在普通 JVM
+     * 单元测试里跑，碰 Android 类会抛 "not mocked"。
+     */
+    public static boolean isWithinHitRadius(int tapX, int tapY,
+                                            int anchorX, int anchorY, float radiusPx) {
+        double dx = tapX - anchorX;
+        double dy = tapY - anchorY;
+        return Math.sqrt(dx * dx + dy * dy) <= radiusPx;
+    }
+
+    /** 线绘制采样：与上一个点的距离是否够远。上一个点为空时一律收下。 */
+    public static boolean shouldSample(LatLng last, LatLng candidate, double minDistanceMeters) {
+        if (last == null) {
+            return true;
+        }
+        return distanceMeters(last, candidate) >= minDistanceMeters;
     }
 
     /** 找出 target 弧长落在哪一段上。 */

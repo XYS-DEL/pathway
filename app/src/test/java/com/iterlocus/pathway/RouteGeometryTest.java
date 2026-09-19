@@ -1,6 +1,7 @@
 package com.iterlocus.pathway;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.baidu.mapapi.model.LatLng;
@@ -131,6 +132,51 @@ public class RouteGeometryTest {
             walked += RouteGeometry.distanceMeters(result.get(i - 1), result.get(i));
         }
         assertTrue("闭合密化后应走满一圈", walked > RouteGeometry.totalLengthMeters(square, false));
+    }
+
+    @Test
+    public void cannotCloseWithFewerThanTwoPoints() {
+        assertFalse(RouteGeometry.canClose(0));
+        assertFalse(RouteGeometry.canClose(1));
+        assertTrue(RouteGeometry.canClose(2));
+        assertTrue(RouteGeometry.canClose(5));
+    }
+
+    @Test
+    public void hitRadiusAcceptsPointsInsideAndOnBoundary() {
+        assertTrue(RouteGeometry.isWithinHitRadius(100, 100, 100, 100, 24f));
+        assertTrue(RouteGeometry.isWithinHitRadius(110, 100, 100, 100, 24f));
+        assertTrue(RouteGeometry.isWithinHitRadius(124, 100, 100, 100, 24f));
+    }
+
+    @Test
+    public void hitRadiusRejectsPointsOutside() {
+        assertFalse(RouteGeometry.isWithinHitRadius(125, 100, 100, 100, 24f));
+        assertFalse(RouteGeometry.isWithinHitRadius(100, 200, 100, 100, 24f));
+    }
+
+    @Test
+    public void hitRadiusUsesEuclideanDistanceNotAxisDistance() {
+        // (117,117) 的对角距离是 24.04 > 24，虽然轴距各只有 17
+        assertFalse(RouteGeometry.isWithinHitRadius(117, 117, 100, 100, 24f));
+    }
+
+    @Test
+    public void firstSampleIsAlwaysAccepted() {
+        assertTrue(RouteGeometry.shouldSample(null, new LatLng(0, 0),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+    }
+
+    @Test
+    public void samplingRejectsPointsTooCloseToLast() {
+        assertFalse(RouteGeometry.shouldSample(new LatLng(0, 0), new LatLng(0, 0.000001),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+    }
+
+    @Test
+    public void samplingAcceptsPointsFarEnoughFromLast() {
+        assertTrue(RouteGeometry.shouldSample(new LatLng(0, 0), new LatLng(0, 0.001),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
     }
 
     private static boolean contains(List<LatLng> points, LatLng target) {
