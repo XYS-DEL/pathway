@@ -75,6 +75,7 @@ CI (`.github/workflows/build-check.yml`) writes these from repo secrets before b
 ### Build constraints
 
 - **arm64-v8a only** (`abiFilters`), `compileSdk = 32`, `targetSdk = 32`.
+- 除 `:app` 外还有 `:nfc` 库模块（见 Architecture 一节）。它的 `minSdkVersion 21` 低于 app 的 27 —— **有意保留**，库的 minSdk 低于宿主完全合法，且该模块的设计目标是可整体复制到别的工程。`nfc/build/` 已被 `.gitignore` 里裸写的 `build` 通配规则覆盖。
 - `resourceConfigurations` is limited to `zh`, `zh-rCN`, `en`, `en-rUS` — add a new locale there if you add translations.
 - Baidu native libs live in `app/libs/` (`BaiduLBS_Android.jar` + `arm64-v8a/*.so`); `app/proguard-rules.pro` keeps all `com.baidu.**` classes.
 - `gradle.properties` enables configuration cache and `warning.mode=all`; `-Xlint:unchecked -Xlint:deprecation` are on for all JavaCompile tasks, so deprecation warnings are expected and noisy.
@@ -127,6 +128,21 @@ Two independent `SQLiteOpenHelper`s, `HistoryLocation.db` and `HistorySearch.db`
 ### Logging
 
 `XLog` (initialized in `GoApplication`) writes to `<externalFilesDir>/Logs/Pathway.log` (the filename comes from the `APP_NAME` constant), console + file, 3-day retention, level `ALL`.
+
+### NFC 位置卡
+
+`:nfc` 是独立的 Gradle 库模块（`com.android.library`，namespace `com.acooldog.nfc`），零第三方依赖、无资源、无 manifest 声明，设计目标是可整体复制到别的工程。它提供读卡（`NfcReaderSession`）、伪造贴卡派发（`NfcSender`）、配置持久化（`NfcConfigStore`）。
+
+`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`——那是个占位界面，解析坐标、坐标系换算、自定义路线、选路线、开始模拟都是它的后续工作。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
+
+两条硬约束：
+
+- **不要接入 `NfcSender`。** 它构造 `ACTION_NDEF_DISCOVERED` 并 `setPackage(目标包名)`，让某个 App 收到与真实贴卡无法区分的广播。本项目明确不使用这个能力。卡片上的包名字段只用于显示、保存、共享，不参与任何派发。
+- **`NfcCardActivity` 必须保持默认启动模式。** NFC 前台调度依赖它；模块 README 明确要求接收标签的 Activity 不能设为 `singleInstance`（`MainActivity` 是 `singleInstance`，别照抄）。
+
+只用 `com.acooldog.nfc` 包下的公开 API，`com.acooldog.nfc.internal` 不得直接引用。
+
+`SavedNfcConfig.isComplete()` 要求名称、URL、包名三者齐全，缺任何一个都会被 `saveSavedConfig` **静默丢弃**（不报错、不保存），所以保存弹框必须显式要求填包名并说明原因。
 
 ## Conventions
 

@@ -141,4 +141,42 @@
 
     <!-- 意见反馈 -->
     <string name="feedback_disabled">反馈渠道暂未开放</string>
+
+    <!-- 通用弹框 -->
+    <string name="app_dialog_confirm">确定</string>
+    <string name="app_dialog_cancel">取消</string>
+
+    <!-- NFC 位置卡 -->
+    <string name="app_nfc_card">NFC 位置卡</string>
+    <string name="nav_menu_nfc_card">NFC 位置卡</string>
+    <string name="nfc_card_status_ready">NFC 已就绪，把卡片贴到手机背面</string>
+    <string name="nfc_card_status_disabled">NFC 未开启</string>
+    <string name="nfc_card_status_no_hardware">本机没有 NFC 硬件</string>
+    <string name="nfc_card_go_settings">去设置</string>
+    <string name="nfc_card_label_url">URL</string>
+    <string name="nfc_card_label_package">包名</string>
+    <string name="nfc_card_url_empty">（尚未读到内容）</string>
+    <string name="nfc_card_package_empty">（卡片未携带）</string>
+    <string name="nfc_card_btn_simulate">模拟nfc</string>
+    <string name="nfc_card_btn_save">保存配置</string>
+    <string name="nfc_card_btn_load">载入本地配置</string>
+    <string name="nfc_card_btn_share">共享nfc</string>
+    <string name="nfc_card_empty_tag">卡片内容为空</string>
+    <string name="nfc_card_nothing_read">尚未读到卡片内容</string>
+    <string name="nfc_card_save_title">保存配置</string>
+    <string name="nfc_card_save_name_hint">配置名称</string>
+    <string name="nfc_card_save_package_hint">包名</string>
+    <string name="nfc_card_save_package_note">名称、URL、包名三者齐全才会保存，因此包名不能留空。</string>
+    <string name="nfc_card_save_ok">已保存</string>
+    <string name="nfc_card_save_incomplete">名称和包名都不能为空</string>
+    <string name="nfc_card_load_title">选择配置</string>
+    <string name="nfc_card_load_empty">还没有保存过配置</string>
+    <string name="nfc_card_share_title">共享 NFC 配置</string>
+    <string name="nfc_card_share_empty">尚无内容可共享</string>
+    <string name="nfc_card_share_package_absent">（无包名）</string>
+
+    <!-- 模拟路线（占位界面） -->
+    <string name="app_route_simulation">模拟路线</string>
+    <string name="route_sim_placeholder">模拟路线功能开发中</string>
+    <string name="route_sim_received">已收到以下参数（仅用于核对交接是否正确）</string>
 </resources>

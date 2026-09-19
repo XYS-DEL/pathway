@@ -47,6 +47,12 @@
     <!-- 允许一个程序打开窗口使用 TYPE_SYSTEM_ALERT，显示在其他所有程序的顶层 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- 读取 NFC 标签。仅用于读取自制的位置卡，不向任何第三方应用派发 Intent -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
     <application
         android:name=".GoApplication"
         android:icon="@mipmap/ic_launcher"
@@ -107,6 +113,18 @@
         <activity
             android:name=".HistoryActivity"
             android:label="@string/app_history"
+            android:exported="false" />
+
+        <!-- 保持默认启动模式：NFC 前台调度依赖它。
+             模块 README 明确要求接收标签的 Activity 不能设成 singleInstance。 -->
+        <activity
+            android:name=".NfcCardActivity"
+            android:label="@string/app_nfc_card"
+            android:exported="false" />
+
+        <activity
+            android:name=".RouteSimulationActivity"
+            android:label="@string/app_route_simulation"
             android:exported="false" />
 
     </application>

@@ -1,0 +1,27 @@
+// 可复用的 NFC 模块：读取 NFC 标签、模拟发送 NDEF、配置持久化。
+// 不依赖 app 模块，不依赖任何第三方库，也不包含任何资源文件。
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.acooldog.nfc'
+    compileSdk 32
+
+    defaultConfig {
+        minSdkVersion 21
+        //noinspection ExpiredTargetSdkVersion
+        targetSdkVersion 32
+    }
+
+    buildFeatures {
+        buildConfig false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
