@@ -64,6 +64,9 @@ public class RouteDrawActivity extends BaseActivity {
     private ListView mSuggestionList;
     private SuggestionSearch mSuggestionSearch;
 
+    /** 最近一次请求的关键字。用于丢弃过期响应：用户可能已经清空输入框或又改了字。 */
+    private String mPendingKeyword = "";
+
     private SQLiteDatabase mRouteDb;
 
     /** 只在进入界面时取一次位置，把地图居中；拿到就停。 */
@@ -161,7 +164,9 @@ public class RouteDrawActivity extends BaseActivity {
     @Override
     protected void onDestroy() {
         stopLocationClient();
-        mSuggestionSearch.destroy();
+        if (mSuggestionSearch != null) {
+            mSuggestionSearch.destroy();
+        }
         mMapView.onDestroy();
         if (mRouteDb != null) {
             mRouteDb.close();
@@ -195,6 +200,15 @@ public class RouteDrawActivity extends BaseActivity {
         mSuggestionList.setAdapter(adapter);
 
         mSuggestionSearch.setOnGetSuggestionResultListener(result -> {
+            // 丢弃过期响应：输入框已清空、或关键字已被改掉时，
+            // 这个响应不该再影响界面——否则列表会在用户已经清空或跳走之后凭空弹出。
+            // 注意这段必须在清空 suggestions/adapter 之前 return，否则列表会先闪一下变空。
+            CharSequence query = mSearchView.getQuery();
+            String current = query == null ? "" : query.toString().trim();
+            if (current.isEmpty() || !current.equals(mPendingKeyword)) {
+                return;
+            }
+
             suggestions.clear();
             adapter.clear();
             if (result == null || result.getAllSuggestions() == null) {
@@ -224,6 +238,7 @@ public class RouteDrawActivity extends BaseActivity {
                     mSuggestionList.setVisibility(View.GONE);
                     return false;
                 }
+                mPendingKeyword = newText.trim();
                 mSuggestionSearch.requestSuggestion(new SuggestionSearchOption()
                         .city(MainActivity.mCurrentCity == null ? "" : MainActivity.mCurrentCity)
                         .keyword(newText));
