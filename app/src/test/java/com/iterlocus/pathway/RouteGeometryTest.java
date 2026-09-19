@@ -179,6 +179,25 @@ public class RouteGeometryTest {
                 RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
     }
 
+    @Test
+    public void samplingThresholdValueAndOperatorArePinned() {
+        LatLng origin = new LatLng(0, 0);
+
+        // 恰好等于阈值：钉住 >= 而不是 >。阈值由 distanceMeters 现算，避免浮点字面量；
+        // 期望值 true 是独立可知的（">=" 在等号处为真），不是拿被测代码当期望。
+        LatLng atThreshold = new LatLng(0, 2.0 / 111195.0);
+        assertTrue(RouteGeometry.shouldSample(origin, atThreshold,
+                RouteGeometry.distanceMeters(origin, atThreshold)));
+
+        // 收紧夹逼：赤道上 1.5e-5 度 ≈ 1.67 米（应丢弃）、2.5e-5 度 ≈ 2.78 米（应保留）。
+        // 这两条把 LINE_SAMPLE_MIN_DISTANCE_METERS 锁进 (1.67, 2.78]，取 1.0 或 3.0 都会失败——
+        // 上面两条只夹到 (0.111, 111.195]，50 和 100 都能蒙混过关。
+        assertFalse(RouteGeometry.shouldSample(origin, new LatLng(0, 1.5e-5),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+        assertTrue(RouteGeometry.shouldSample(origin, new LatLng(0, 2.5e-5),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+    }
+
     private static boolean contains(List<LatLng> points, LatLng target) {
         for (LatLng p : points) {
             if (Math.abs(p.latitude - target.latitude) < 1e-9
