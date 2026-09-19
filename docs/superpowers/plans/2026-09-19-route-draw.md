@@ -1768,21 +1768,15 @@ public class RouteDrawActivity extends BaseActivity {
     }
 
     /**
-     * 取一次当前位置把地图居中，省得每次进来都要手动平移。
-     *
-     * <p>这里刻意用 {@code setScanSpan(0)}（只定位一次），与 MainActivity 的
-     * 1000ms 持续定位是两种不同配置——不要因为「看着像」就把 MainActivity 的
-     * getLocationClientOption() 抄过来，那既多余又会被审查判为复制逻辑块。
-     *
-     * <p>定位失败不拦路：停在默认中心，提示用户手动平移。
-     */
-    /**
      * 百度定位的失败码远多于成功码（TypeNone、TypeCriteriaException、TypeNetWorkException、
      * TypeOffLineLocationFail、TypeServerError 等十余个），所以判定必须走**成功白名单**。
      *
      * <p>反过来的写法（白名单两三个失败码、其余当成功）会让绝大多数失败落到
      * {@code animateMapStatus} 上：失败的 BDLocation 经纬度常为 0，相机会飞到几内亚湾，
      * 而且不弹任何提示——用户只看到地图莫名跑到海上。
+     *
+     * <p>注意 {@code TypeGpsLocation} 与 {@code TypeGnssLocation} 的取值都是 61（javap 核实），
+     * 那个 {@code ||} 项在数值上冗余；保留两个名字是为了表意，不要以为这里写错了。
      */
     private static boolean isLocateSuccess(int locType) {
         return locType == BDLocation.TypeGpsLocation
@@ -1793,6 +1787,15 @@ public class RouteDrawActivity extends BaseActivity {
                 || locType == BDLocation.TypeCacheLocation;
     }
 
+    /**
+     * 取一次当前位置把地图居中，省得每次进来都要手动平移。
+     *
+     * <p>这里刻意用 {@code setScanSpan(0)}（只定位一次），与 MainActivity 的
+     * 1000ms 持续定位是两种不同配置——不要因为「看着像」就把 MainActivity 的
+     * getLocationClientOption() 抄过来，那既多余又会被审查判为复制逻辑块。
+     *
+     * <p>定位失败不拦路：停在默认中心，提示用户手动平移。
+     */
     private void centerOnCurrentLocation() {
         try {
             mLocClient = new LocationClient(getApplicationContext());
