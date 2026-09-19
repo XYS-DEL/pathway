@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.baidu.mapapi.map.MapView
+        android:id="@+id/route_draw_map"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true" />
+
+    <com.iterlocus.pathway.RouteDrawOverlayView
+        android:id="@+id/route_draw_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 面板收起时的入口 -->
+    <Button
+        android:id="@+id/route_draw_tools_toggle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|top"
+        android:layout_margin="12dp"
+        android:text="@string/route_draw_tools_toggle" />
+
+    <include
+        android:id="@+id/route_draw_tools"
+        layout="@layout/route_draw_tools"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="end" />
+
+    <TextView
+        android:id="@+id/route_draw_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|bottom"
+        android:layout_margin="12dp"
+        android:background="#CCFFFFFF"
+        android:padding="6dp"
+        android:text="@string/route_draw_status_idle"
+        android:textSize="12sp" />
+
+</FrameLayout>
