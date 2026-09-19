@@ -600,6 +600,25 @@ git commit -m "feat: 路线按总长等距密化"
         assertTrue(RouteGeometry.shouldSample(new LatLng(0, 0), new LatLng(0, 0.001),
                 RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
     }
+
+    @Test
+    public void samplingThresholdValueAndOperatorArePinned() {
+        LatLng origin = new LatLng(0, 0);
+
+        // 恰好等于阈值：钉住 >= 而不是 >。阈值由 distanceMeters 现算，避免浮点字面量；
+        // 期望值 true 是独立可知的（"≥" 在等号处为真），不是拿被测代码当期望。
+        LatLng atThreshold = new LatLng(0, 2.0 / 111195.0);
+        assertTrue(RouteGeometry.shouldSample(origin, atThreshold,
+                RouteGeometry.distanceMeters(origin, atThreshold)));
+
+        // 收紧夹逼：赤道上 1.5e-5 度 ≈ 1.67 米（应丢弃）、2.5e-5 度 ≈ 2.78 米（应保留）。
+        // 这两条把 LINE_SAMPLE_MIN_DISTANCE_METERS 锁进 (1.67, 2.78]，取 1.0 或 3.0 都会失败——
+        // 上面两条只夹到 (0.111, 111.195]，50 和 100 都能蒙混过关。
+        assertFalse(RouteGeometry.shouldSample(origin, new LatLng(0, 1.5e-5),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+        assertTrue(RouteGeometry.shouldSample(origin, new LatLng(0, 2.5e-5),
+                RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
+    }
 ```
 
 - [ ] **Step 2: 运行,确认失败**（`找不到符号: 方法 canClose`）
@@ -2138,7 +2157,7 @@ git commit -m "feat: 绘制路线入口接线，并补文档"
 ## 完成标准
 
 - `./gradlew assembleDebug lintDebug testDebugUnitTest` 全绿
-- `RouteGeometryTest` 21 个用例、`RouteNameValidatorTest` 8 个用例全过
+- `RouteGeometryTest` 22 个用例、`RouteNameValidatorTest` 9 个用例全过
 - 装机后可：进入绘制界面 → **地图自动居中到当前位置**（定位失败则提示手动平移）→ 锁定地图 → 点绘/线绘 → 闭合 → 密化 → 保存 → 再打开保存弹框能看到刚存的名称
 - 重名保存被拒并提示换名；非法名称（空、超长、含 `/` 或换行）被拒并提示具体原因
 
