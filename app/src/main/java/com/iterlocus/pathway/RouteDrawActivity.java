@@ -67,6 +67,9 @@ public class RouteDrawActivity extends BaseActivity {
     /** 最近一次请求的关键字。用于丢弃过期响应：用户可能已经清空输入框或又改了字。 */
     private String mPendingKeyword = "";
 
+    /** 当前是否为卫星图。默认 false，与 BaiduMap 的初始状态一致。 */
+    private boolean mSatellite;
+
     private SQLiteDatabase mRouteDb;
 
     /** 只在进入界面时取一次位置，把地图居中；拿到就停。 */
@@ -147,6 +150,7 @@ public class RouteDrawActivity extends BaseActivity {
         updateUndoButton();
 
         initSearchView();
+        initLayerButton();
     }
 
     @Override
@@ -254,6 +258,25 @@ public class RouteDrawActivity extends BaseActivity {
             mSearchView.setQuery("", false);
             mSearchView.clearFocus();
         });
+    }
+
+    /** 图层切换：普通图 ↔ 卫星图。按钮文字显示的是「点它会切到哪」。 */
+    private void initLayerButton() {
+        TextView button = findViewById(R.id.route_draw_layer_button);
+        updateLayerButtonText(button);
+        button.setOnClickListener(v -> {
+            mSatellite = !mSatellite;
+            mBaiduMap.setMapType(mSatellite
+                    ? BaiduMap.MAP_TYPE_SATELLITE
+                    : BaiduMap.MAP_TYPE_NORMAL);
+            updateLayerButtonText(button);
+        });
+    }
+
+    private void updateLayerButtonText(TextView button) {
+        button.setText(mSatellite
+                ? R.string.route_draw_layer_normal
+                : R.string.route_draw_layer_satellite);
     }
 
     /** 锁定时关掉地图自身的手势，触摸全归绘制层；解锁后相反。 */

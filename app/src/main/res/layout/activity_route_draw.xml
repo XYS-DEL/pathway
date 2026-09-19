@@ -27,6 +27,23 @@
         android:iconifiedByDefault="false"
         android:queryHint="@string/route_draw_search_hint" />
 
+    <!-- 图层切换：搜索栏的右下方。文字反映当前状态，点它会切到另一种。 -->
+    <TextView
+        android:id="@+id/route_draw_layer_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="68dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_tool_chip"
+        android:clickable="true"
+        android:focusable="true"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_layer_satellite"
+        android:textColor="#212121"
+        android:textSize="13sp" />
+
     <!-- 搜索建议列表：同样在绘制层之后。默认隐藏，输入时才显示。 -->
     <ListView
         android:id="@+id/route_draw_suggestion_list"

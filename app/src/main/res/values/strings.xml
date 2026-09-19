@@ -224,4 +224,6 @@
     <string name="route_draw_arrow_collapse">‹</string>
     <string name="route_draw_arrow_expand">›</string>
     <string name="route_draw_search_hint">搜索地点</string>
+    <string name="route_draw_layer_satellite">卫星图</string>
+    <string name="route_draw_layer_normal">普通图</string>
 </resources>
