@@ -48,3 +48,6 @@ captures/
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
+
+# superpowers 技能的计划执行草稿（ledger、任务简报、审查包），非源码
+.superpowers/
