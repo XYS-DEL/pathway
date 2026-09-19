@@ -14,7 +14,8 @@
 
 - 包根 `com.iterlocus.pathway`；Activity 放根包，SQLite 助手放 `com.iterlocus.pathway.database`。
 - 注释与提交信息用中文；用户可见文案进 `res/values/strings.xml`，沿用 `app_*` 前缀。
-- 出错记 `XLog.e("ROUTE: ERROR - <method>")` 并降级，**不抛异常、不崩溃**。
+- 出错记 `XLog.e("ROUTE: ERROR - <method>")` 并降级，**不抛异常、不崩溃**。此约束作用于**运行时数据路径**（查询、插入、编解码）。
+  **DDL 例外**：`onCreate`/`onUpgrade` 建表失败时，记日志后**照抛**——建表失败是编程错误而非运行时读写失败（spec 的错误处理表只覆盖「数据库读写失败」），静默吞掉会让此后每次保存都无声失败，比崩更难查。详见 `DataBaseRoute` 的实现与 `CLAUDE.md`。
 - 路线坐标一律 **BD09**（地图原生）。模拟侧调用时才转 WGS84。
 - `MapUtils` 入参顺序是 **(经度, 纬度)**；`LatLng` 构造是 **(纬度, 经度)**。写反偏 500 米且不报错。
 - 「密化」的 N 是**新增点数量**，不是分段数：总长等分 N+1 段。
@@ -789,13 +790,26 @@ public class DataBaseRoute extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        db.execSQL(CREATE_TABLE);
+        try {
+            db.execSQL(CREATE_TABLE);
+        } catch (RuntimeException e) {
+            /* 建表失败是编程错误（DDL 写坏了），不是运行时读写失败。
+             * spec 的错误处理表只覆盖后者。吞掉会让数据库没有表、此后每次保存都无声失败，
+             * 对用户是永久且无法解释的；记日志后照抛，让它在开发者第一次实测时立刻暴露。 */
+            XLog.e("ROUTE: ERROR - onCreate");
+            throw e;
+        }
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
-        onCreate(db);
+        try {
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
+            onCreate(db);
+        } catch (RuntimeException e) {
+            XLog.e("ROUTE: ERROR - onUpgrade");
+            throw e;
+        }
     }
 
     /** 名称是否已被占用（大小写不敏感，与列的 COLLATE NOCASE 一致）。 */
