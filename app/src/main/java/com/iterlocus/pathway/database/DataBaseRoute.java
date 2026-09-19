@@ -50,13 +50,26 @@ public class DataBaseRoute extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        db.execSQL(CREATE_TABLE);
+        try {
+            db.execSQL(CREATE_TABLE);
+        } catch (RuntimeException e) {
+            /* 建表失败是编程错误（DDL 写坏了），不是运行时读写失败。
+             * spec 的错误处理表只覆盖后者。吞掉会让数据库没有表、此后每次保存都无声失败，
+             * 对用户是永久且无法解释的；记日志后照抛，让它在开发者第一次实测时立刻暴露。 */
+            XLog.e("ROUTE: ERROR - onCreate");
+            throw e;
+        }
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
-        onCreate(db);
+        try {
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
+            onCreate(db);
+        } catch (RuntimeException e) {
+            XLog.e("ROUTE: ERROR - onUpgrade");
+            throw e;
+        }
     }
 
     /** 名称是否已被占用（大小写不敏感，与列的 COLLATE NOCASE 一致）。 */
