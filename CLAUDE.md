@@ -119,7 +119,7 @@ A custom overlay `View` added to the `WindowManager` (not part of any activity l
 
 ### Persistence
 
-Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the original two), plus `RouteConfig.db` for drawn routes. All are `DB_VERSION = 1` with a destructive `onUpgrade` (drop + recreate). Save helpers are `static` and dedupe by deleting matching rows before inserting (location keyed on WGS84 lng/lat, search keyed on the query string, route keyed on a `COLLATE NOCASE UNIQUE` name column). `HistoryActivity` can apply a random offset (meters → degrees, ±`setting_lat_max_offset` / `setting_lon_max_offset`) when a history entry is tapped.
+Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the original two), plus `RouteConfig.db` for drawn routes. All are `DB_VERSION = 1` with a destructive `onUpgrade` (drop + recreate). Save helpers are `static`. The two **history** helpers dedupe by deleting matching rows before inserting (location keyed on WGS84 lng/lat, search keyed on the query string); **`DataBaseRoute` deliberately does the opposite** — it refuses a duplicate name and returns `-1` and never overwrites, because a hand-drawn route is expensive to reproduce and silently replacing it would be data loss. Its `COLLATE NOCASE UNIQUE` column is the enforcement, not a hint to delete-then-insert. `HistoryActivity` can apply a random offset (meters → degrees, ±`setting_lat_max_offset` / `setting_lon_max_offset`) when a history entry is tapped.
 
 **DDL error handling is the one deliberate exception to "log and degrade".** Runtime data paths (`query`/`insert`/encode/decode) must log via `XLog.e` and return a safe value rather than throw — that is the project-wide convention. `onCreate`/`onUpgrade` instead **log and rethrow**: a malformed `CREATE TABLE` is a programming error, not a runtime read/write failure, and swallowing it leaves a table-less database whose every later save fails silently and permanently. `DataBaseRoute` implements this shape; the two older helpers still have unguarded `onCreate`/`onUpgrade`, so the `database` package currently carries two idioms — follow `DataBaseRoute`.
 
@@ -148,6 +148,9 @@ Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the orig
   且绘制层消费触摸，解锁后相反。
 - `RouteDrawActivity` 含 `MapView`，必须转发 `onResume`/`onPause`/`onDestroy`；
   且保持默认启动模式。
+- **`RouteDrawActivity` 锁竖屏**（manifest 的 `screenOrientation="portrait"`）：它持有 `MapView`、
+  GL 覆盖层与一次性定位客户端，旋转会重建 Activity，把用户正在画的那条路线连同撤销栈一起丢掉。
+  代价是画不了横屏——若日后要放开，应先做点集持久化，而不是直接删掉这行。
 
 ### NFC 位置卡
 

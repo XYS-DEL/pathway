@@ -39,6 +39,16 @@ import java.util.List;
  */
 public class RouteDrawActivity extends BaseActivity {
 
+    /**
+     * 密化一次能新增的点数上限。
+     *
+     * <p>没有上限时，输入六七位数会让 densify 在主线程上做 N 次带线性扫描的迭代并逐个分配对象，
+     * 随后绘制层还要为每个点每帧画一个圆（且整个绘制层跑在软件层上）。轻则 ANR，
+     * 重则 OutOfMemoryError——那是 Error，任何 catch (Exception) 都拦不住，
+     * 而点集只存在内存里，用户整条手绘路线会一起丢掉。
+     */
+    private static final int MAX_DENSIFY_ADD_COUNT = 1000;
+
     private MapView mMapView;
     private BaiduMap mBaiduMap;
     private RouteDrawOverlayView mOverlay;
@@ -315,6 +325,11 @@ public class RouteDrawActivity extends BaseActivity {
                     if (addCount <= 0) {
                         GoUtils.DisplayToast(this,
                                 getResources().getString(R.string.route_draw_densify_invalid));
+                        return;
+                    }
+                    if (addCount > MAX_DENSIFY_ADD_COUNT) {
+                        GoUtils.DisplayToast(this, getResources().getString(
+                                R.string.route_draw_densify_too_many, MAX_DENSIFY_ADD_COUNT));
                         return;
                     }
 

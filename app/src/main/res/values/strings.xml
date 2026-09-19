@@ -195,6 +195,7 @@
     <string name="route_draw_densify_hint">加点数 N</string>
     <string name="route_draw_densify_note">在总长上等分 N+1 段，均匀插入 N 个新点。原有顶点会保留。</string>
     <string name="route_draw_densify_invalid">请输入大于 0 的整数</string>
+    <string name="route_draw_densify_too_many">加点数不能超过 %1$d</string>
     <string name="route_draw_densify_done">已插入 %1$d 个点</string>
     <string name="route_draw_densify_no_route">还没有画出可密化的路线</string>
     <string name="route_draw_save_title">保存路线</string>

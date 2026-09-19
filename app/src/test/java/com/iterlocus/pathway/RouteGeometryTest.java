@@ -153,6 +153,10 @@ public class RouteGeometryTest {
     public void hitRadiusRejectsPointsOutside() {
         assertFalse(RouteGeometry.isWithinHitRadius(125, 100, 100, 100, 24f));
         assertFalse(RouteGeometry.isWithinHitRadius(100, 200, 100, 100, 24f));
+
+        // 对角线方向的 (16,16)：L2 距离 √512 ≈ 22.63 ≤ 24（应命中），
+        // 而曼哈顿距离 32 > 24（会误判）。上一条只排除了切比雪夫。
+        assertTrue(RouteGeometry.isWithinHitRadius(116, 116, 100, 100, 24f));
     }
 
     @Test

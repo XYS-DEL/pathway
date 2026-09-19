@@ -164,6 +164,11 @@ public class RouteDrawOverlayView extends View {
     /** 整体替换点集（撤销恢复、载入时用）。 */
     public void setPoints(List<LatLng> points) {
         mPoints.clear();
+        // 与 setDrawMode/clearRoute 一致：清空笔画必须一并作废手势。
+        // 少了这两行，分屏触摸下（一指拖动、另一指点撤销）活着的笔画会在抬指时
+        // 被 finishStroke 追加到刚恢复的点集上，画出一条错乱的路线。
+        mStroke.clear();
+        mTouching = false;
         if (points != null) {
             mPoints.addAll(points);
         }
