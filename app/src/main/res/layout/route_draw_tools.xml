@@ -3,12 +3,13 @@
      箭头片常驻（收起后只剩它）；其余片随折叠一并 GONE。
      模式选择与锁定开关用 android:button="@null" 隐去系统自带的圆点/勾选框，
      只靠 bg_tool_chip_toggle 的选中态表达。 -->
+<!-- 位置（gravity / marginStart）由引入方在 <include> 标签上声明，本根不声明：
+     当 <include> 同时带 layout_width 与 layout_height 时，布局参数完全取自标签，
+     根的 gravity/margin 不会被读取（见 LayoutInflater.parseInclude）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/route_draw_tools"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:layout_gravity="start|center_vertical"
-    android:layout_marginStart="12dp"
     android:orientation="vertical">
 
     <TextView
@@ -23,7 +24,7 @@
         android:paddingHorizontal="14dp"
         android:paddingVertical="10dp"
         android:text="@string/route_draw_arrow_collapse"
-        android:textColor="#212121"
+        android:textColor="@color/chip_text"
         android:textSize="18sp"
         android:textStyle="bold" />
 
@@ -83,7 +84,7 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
         android:text="@string/route_draw_btn_densify"
-        android:textColor="#212121" />
+        android:textColor="@color/chip_text" />
 
     <TextView
         android:id="@+id/route_draw_btn_undo"
@@ -96,7 +97,7 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
         android:text="@string/route_draw_btn_undo"
-        android:textColor="#212121" />
+        android:textColor="@color/chip_text" />
 
     <TextView
         android:id="@+id/route_draw_btn_clear"
@@ -109,7 +110,7 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
         android:text="@string/route_draw_btn_clear"
-        android:textColor="#212121" />
+        android:textColor="@color/chip_text" />
 
     <TextView
         android:id="@+id/route_draw_btn_finish"
