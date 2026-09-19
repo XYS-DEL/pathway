@@ -1114,6 +1114,8 @@ public class RouteDrawOverlayView extends View {
     public void setDrawMode(int mode) {
         mMode = mode;
         mStroke.clear();
+        // 作废进行中的手势：否则手指仍按着时，下一次 MOVE 会在空笔画上重新播种一段幽灵轨迹
+        mTouching = false;
         invalidate();
     }
 
@@ -1157,6 +1159,8 @@ public class RouteDrawOverlayView extends View {
         mPoints.clear();
         mStroke.clear();
         mClosed = false;
+        // 同 setDrawMode：清空笔画必须一并作废手势
+        mTouching = false;
         invalidate();
     }
 
@@ -1197,6 +1201,11 @@ public class RouteDrawOverlayView extends View {
                 return true;
 
             case MotionEvent.ACTION_MOVE:
+                // 没有进行中的手势就忽略：setDrawMode/clearRoute 会在手指仍按着时清空笔画，
+                // 不设这道守卫，下一次 MOVE 会用 shouldSample(null,...) 恒真从空笔画里播种出一段幽灵轨迹
+                if (!mTouching) {
+                    return true;
+                }
                 if (mMode == MODE_LINE) {
                     extendStroke();
                 }
@@ -1204,6 +1213,9 @@ public class RouteDrawOverlayView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                if (!mTouching) {
+                    return true;
+                }
                 mTouching = false;
                 if (mMode == MODE_POINT) {
                     handlePointTap(event.getX(), event.getY());
