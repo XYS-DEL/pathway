@@ -107,7 +107,23 @@ N 越大路径越平滑。密化是可撤销操作，效果不满意可以撤销
 「完成绘制」→ 弹框填名称 → 保存。
 
 - **至少 2 个点才能保存**，不足时提示并拒绝（与闭合下限一致，1 个点的路线没有意义）
-- 同名配置的处理方式：沿用项目里 SQLite 助手的既有惯例（保存前先删同名行再插入），即同名覆盖
+- **同名路线不允许覆盖。** 检测到重名时拒绝写入并提示「该名称已存在，请换一个」。不覆盖、不生成副本。理由：路线是花了工夫画的，静默覆盖等于丢数据；而自动改名（如 `路线(2)`）会让用户分不清哪条是哪条
+
+### 名称校验
+
+弹框确认前先校验，任何一条不过就就地提示、不写库：
+
+| 规则 | 说明 |
+|---|---|
+| 先 `trim()` | 去掉首尾空白后再判定，避免 `"路线"` 与 `"路线 "` 被当成两条 |
+| 长度 1–32 | trim 后计。空串拒绝；超长拒绝（32 是显示与后续导出的舒适上限） |
+| 禁止控制字符 | 含换行 `\n`、回车 `\r`、制表符 `\t`，以及 `0x00`–`0x1F`、`0x7F` |
+| 禁止以下符号 | `/ \ : * ? " < > \|` —— 这些在后续若要导出成文件名时会惹麻烦，提前挡掉 |
+| 其余允许 | 中英文、数字、空格、下划线、连字符、括号、点号等 |
+
+重名判定用 `trim` 后**大小写不敏感**比较（与 `nfc` 模块 `SavedNfcConfig` 的 `equalsIgnoreCase` 惯例一致），数据库列上加 `COLLATE NOCASE` 的 `UNIQUE` 约束作为兜底。
+
+校验逻辑放在 `RouteGeometry` 之外的独立小类 `RouteNameValidator`（纯逻辑，可单元测试），不要散在 Activity 里。
 
 ## 数据模型与存储
 
@@ -125,12 +141,14 @@ RouteConfig {
 ```sql
 CREATE TABLE RouteConfig (
   DB_COLUMN_ID         INTEGER PRIMARY KEY AUTOINCREMENT,
-  DB_COLUMN_NAME       TEXT    NOT NULL,
+  DB_COLUMN_NAME       TEXT    NOT NULL COLLATE NOCASE UNIQUE,
   DB_COLUMN_CLOSED     INTEGER NOT NULL,
   DB_COLUMN_POINTS     TEXT    NOT NULL,
   DB_COLUMN_CREATED_AT BIGINT  NOT NULL
 )
 ```
+
+`COLLATE NOCASE UNIQUE` 让重名在数据库层也拦得住，与代码里的 `equalsIgnoreCase` 判定保持一致。
 
 点集序列化为 JSON 数组存进一个 TEXT 列。路线点数不定，拆成行既难查也没意义。
 
@@ -153,6 +171,8 @@ CREATE TABLE RouteConfig (
 - `app/src/main/java/com/iterlocus/pathway/RouteConfig.java` — 数据模型
 - `app/src/main/java/com/iterlocus/pathway/RouteGeometry.java` — 纯逻辑：弧长、密化、闭合判定、采样过滤
 - `app/src/test/java/com/iterlocus/pathway/RouteGeometryTest.java` — 单元测试
+- `app/src/main/java/com/iterlocus/pathway/RouteNameValidator.java` — 纯逻辑：名称合规校验
+- `app/src/test/java/com/iterlocus/pathway/RouteNameValidatorTest.java` — 单元测试
 - `app/src/main/java/com/iterlocus/pathway/database/DataBaseRoute.java`
 - `app/src/main/res/layout/activity_route_draw.xml`
 - `app/src/main/res/layout/route_draw_tools.xml` — 工具面板
@@ -173,6 +193,9 @@ CREATE TABLE RouteConfig (
 | 情形 | 处理 |
 |---|---|
 | 保存时点数 < 2 | 提示并拒绝 |
+| 名称不合规（空、超长、含控制字符或禁用符号） | 就地提示具体原因并拒绝 |
+| 名称重名 | 提示「该名称已存在，请换一个」并拒绝，**不覆盖** |
+| 写库时撞上 UNIQUE 约束（并发兜底） | 按重名处理，提示换名 |
 | 密化时无点或总长为 0 | 不做任何事，提示用户 |
 | 密化输入非法（空、非数字、≤0） | 提示并拒绝，不关闭弹框以外的任何状态 |
 | 点绘制下点数 < 2 时点初始点 | 不闭合，当作再落一个点 |
@@ -188,6 +211,14 @@ CREATE TABLE RouteConfig (
 - 闭合判定：命中半径内/外、**点数不足 2 时拒绝**、边界值（恰好等于半径）
 - 线绘制采样过滤：距离小于阈值被丢弃、大于阈值被保留
 - 坐标顺序：专门写一组用例盯住 `(经度, 纬度)` 与 `LatLng(纬度, 经度)` 的差异，防止写反
+
+**`RouteNameValidator` 同样是纯逻辑，一并先写测试。** 覆盖：
+
+- 空串、纯空白、超长（32 / 33 边界）
+- 含 `\n`、`\r`、`\t`、`0x00` 等控制字符
+- 含 `/ \ : * ? " < > |` 各一个用例
+- 正常中英文名、含空格与括号的名、恰好 32 字符
+- `trim` 生效：`"  路线  "` 与 `"路线"` 视为同名
 
 这是仓库里第一批真实单元测试（`nfc` 模块另有一个 `NfcPayloadParserTest`）。
 
