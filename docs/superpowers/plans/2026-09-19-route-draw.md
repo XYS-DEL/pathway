@@ -365,7 +365,7 @@ git commit -m "feat: 路线几何——测地距离与折线弧长"
 
 - [ ] **Step 1: 追加失败的测试**
 
-在 `RouteGeometryTest` 顶部补 `import static org.junit.Assert.assertFalse;` 与 `import static org.junit.Assert.assertTrue;`，然后追加：
+在 `RouteGeometryTest` 顶部补 `import static org.junit.Assert.assertTrue;`（**只补这一个**——`assertFalse` 是 Task 4 才用到的，提前加会留下一个未使用 import），然后追加：
 
 ```java
     @Test
