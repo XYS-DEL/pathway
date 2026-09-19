@@ -180,6 +180,23 @@ public class RouteDrawActivity extends BaseActivity {
     }
 
     /**
+     * 百度定位的失败码远多于成功码（TypeNone、TypeCriteriaException、TypeNetWorkException、
+     * TypeOffLineLocationFail、TypeServerError 等十余个），所以判定必须走**成功白名单**。
+     *
+     * <p>反过来的写法（白名单两三个失败码、其余当成功）会让绝大多数失败落到
+     * {@code animateMapStatus} 上：失败的 BDLocation 经纬度常为 0，相机会飞到几内亚湾，
+     * 而且不弹任何提示——用户只看到地图莫名跑到海上。
+     */
+    private static boolean isLocateSuccess(int locType) {
+        return locType == BDLocation.TypeGpsLocation
+                || locType == BDLocation.TypeGnssLocation
+                || locType == BDLocation.TypeNetWorkLocation
+                || locType == BDLocation.TypeCoarseLocation
+                || locType == BDLocation.TypeOffLineLocation
+                || locType == BDLocation.TypeCacheLocation;
+    }
+
+    /**
      * 取一次当前位置把地图居中，省得每次进来都要手动平移。
      *
      * <p>这里刻意用 {@code setScanSpan(0)}（只定位一次），与 MainActivity 的
@@ -197,9 +214,7 @@ public class RouteDrawActivity extends BaseActivity {
                     if (bdLocation == null || mBaiduMap == null) {
                         return;
                     }
-                    int locType = bdLocation.getLocType();
-                    if (locType == BDLocation.TypeCriteriaException
-                            || locType == BDLocation.TypeNetWorkException) {
+                    if (!isLocateSuccess(bdLocation.getLocType())) {
                         GoUtils.DisplayToast(RouteDrawActivity.this,
                                 getResources().getString(R.string.route_draw_locate_failed));
                         stopLocationClient();

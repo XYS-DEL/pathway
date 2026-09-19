@@ -14,12 +14,14 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 面板收起时的入口 -->
+    <!-- 面板收起时的入口。
+         刻意放在 start|top：面板是 end 侧、match_parent 高、且在子视图列表里更靠后，
+         会盖住 end 侧的一切——放 end|top 的话面板一打开，收起按钮就被自己盖住，关不掉。 -->
     <Button
         android:id="@+id/route_draw_tools_toggle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|top"
+        android:layout_gravity="start|top"
         android:layout_margin="12dp"
         android:text="@string/route_draw_tools_toggle" />
 
