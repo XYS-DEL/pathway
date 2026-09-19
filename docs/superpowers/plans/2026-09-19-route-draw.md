@@ -2129,10 +2129,15 @@ git commit -m "feat: 绘制路线的密化、撤销、清空与保存"
 在 `AndroidManifest.xml` 的 `.NfcCardActivity` 之后插入：
 
 ```xml
+        <!-- 锁定竖屏：本界面持有 MapView、GL 覆盖层、一次性定位客户端，
+             以及用户正在画的那条路线。旋转会重建 Activity，把整条绘制连同撤销栈一起丢掉，
+             而 onSaveInstanceState 只能救点集、救不了 MapView 与 GL 上下文。
+             代价是失去横屏作画的空间——若日后要做横屏，应改为持久化点集而非直接解锁。 -->
         <activity
             android:name=".RouteDrawActivity"
             android:label="@string/app_route_draw"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 ```
 
 - [ ] **Step 2: 加侧滑入口**
