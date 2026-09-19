@@ -2,15 +2,19 @@ package com.iterlocus.pathway;
 
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
 
 import com.baidu.location.BDAbstractLocationListener;
 import com.baidu.location.BDLocation;
@@ -113,6 +117,11 @@ public class RouteDrawActivity extends BaseActivity {
         mOverlay.setDrawEnabled(true);
 
         centerOnCurrentLocation();
+
+        findViewById(R.id.route_draw_btn_densify).setOnClickListener(v -> showDensifyDialog());
+        findViewById(R.id.route_draw_btn_undo).setOnClickListener(v -> undo());
+        findViewById(R.id.route_draw_btn_clear).setOnClickListener(v -> confirmClear());
+        findViewById(R.id.route_draw_btn_finish).setOnClickListener(v -> showSaveDialog());
 
         updateStatusText();
         updateUndoButton();
@@ -252,6 +261,185 @@ public class RouteDrawActivity extends BaseActivity {
         if (mLocClient != null) {
             mLocClient.stop();
             mLocClient = null;
+        }
+    }
+
+    /** 撤销一步：丢弃当前状态，恢复到上一个快照。 */
+    private void undo() {
+        if (mUndoStack.isEmpty()) {
+            GoUtils.DisplayToast(this, getResources().getString(R.string.route_draw_undo_empty));
+            return;
+        }
+        mUndoStack.remove(mUndoStack.size() - 1);   // 丢掉「当前」
+
+        if (mUndoStack.isEmpty()) {
+            mOverlay.setPoints(new ArrayList<LatLng>());
+            mOverlay.setClosed(false);
+        } else {
+            Snapshot previous = mUndoStack.get(mUndoStack.size() - 1);
+            mOverlay.setPoints(previous.points);
+            mOverlay.setClosed(previous.closed);
+        }
+        updateStatusText();
+        updateUndoButton();
+    }
+
+    /** 密化：弹框输入加点数 N，按总长等距插入 N 个新点。 */
+    private void showDensifyDialog() {
+        final List<LatLng> current = mOverlay.getPoints();
+        if (current.size() < RouteGeometry.MIN_POINTS_FOR_CLOSE) {
+            GoUtils.DisplayToast(this,
+                    getResources().getString(R.string.route_draw_densify_no_route));
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setHint(R.string.route_draw_densify_hint);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        int padding = (int) (getResources().getDisplayMetrics().density * 20);
+        input.setPadding(padding, padding / 2, padding, 0);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.route_draw_densify_title)
+                .setMessage(R.string.route_draw_densify_note)
+                .setView(input)
+                .setPositiveButton(R.string.app_dialog_confirm, (dialog, which) -> {
+                    int addCount;
+                    try {
+                        addCount = Integer.parseInt(input.getText().toString().trim());
+                    } catch (NumberFormatException e) {
+                        GoUtils.DisplayToast(this,
+                                getResources().getString(R.string.route_draw_densify_invalid));
+                        return;
+                    }
+                    if (addCount <= 0) {
+                        GoUtils.DisplayToast(this,
+                                getResources().getString(R.string.route_draw_densify_invalid));
+                        return;
+                    }
+
+                    double before = RouteGeometry.totalLengthMeters(current, mOverlay.isClosed());
+                    List<LatLng> densified = RouteGeometry.densify(
+                            current, mOverlay.isClosed(), addCount);
+                    if (before <= 0d || densified.size() == current.size()) {
+                        GoUtils.DisplayToast(this,
+                                getResources().getString(R.string.route_draw_densify_no_route));
+                        return;
+                    }
+
+                    mOverlay.setPoints(densified);
+                    onRouteChanged();
+                    GoUtils.DisplayToast(this, getResources().getString(
+                            R.string.route_draw_densify_done, densified.size() - current.size()));
+                })
+                .setNegativeButton(R.string.app_dialog_cancel, null)
+                .show();
+    }
+
+    /** 清空不可撤销，二次确认。 */
+    private void confirmClear() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.route_draw_clear_title)
+                .setMessage(R.string.route_draw_clear_message)
+                .setPositiveButton(R.string.app_dialog_confirm, (dialog, which) -> {
+                    mOverlay.clearRoute();
+                    mUndoStack.clear();          // 清空后没有可回到的状态
+                    updateStatusText();
+                    updateUndoButton();
+                })
+                .setNegativeButton(R.string.app_dialog_cancel, null)
+                .show();
+    }
+
+    /** 保存：校验收名称与重名，再写库。 */
+    private void showSaveDialog() {
+        final List<LatLng> points = mOverlay.getPoints();
+        if (points.size() < RouteGeometry.MIN_POINTS_FOR_CLOSE) {
+            GoUtils.DisplayToast(this,
+                    getResources().getString(R.string.route_draw_save_too_few_points));
+            return;
+        }
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) (getResources().getDisplayMetrics().density * 20);
+        container.setPadding(padding, padding / 2, padding, 0);
+
+        final EditText nameInput = new EditText(this);
+        nameInput.setHint(R.string.route_draw_save_name_hint);
+        nameInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        container.addView(nameInput);
+
+        // 列出已有名称：既让用户知道哪些名字被占用（重名会被拒），也验证保存确实生效
+        TextView existing = new TextView(this);
+        List<String> names = mRouteDb == null
+                ? new ArrayList<String>()
+                : DataBaseRoute.queryAllNames(mRouteDb);
+        existing.setTextSize(12);
+        if (names.isEmpty()) {
+            existing.setText(R.string.route_draw_save_none);
+        } else {
+            StringBuilder builder = new StringBuilder(
+                    getResources().getString(R.string.route_draw_save_existing));
+            for (String name : names) {
+                builder.append("\n· ").append(name);
+            }
+            existing.setText(builder.toString());
+        }
+        container.addView(existing);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.route_draw_save_title)
+                .setView(container)
+                .setPositiveButton(R.string.app_dialog_confirm, (dialog, which) ->
+                        saveRoute(nameInput.getText().toString()))
+                .setNegativeButton(R.string.app_dialog_cancel, null)
+                .show();
+    }
+
+    private void saveRoute(String rawName) {
+        RouteNameValidator.Problem problem = RouteNameValidator.findProblem(rawName);
+        if (problem != null) {
+            GoUtils.DisplayToast(this, describeNameProblem(problem));
+            return;
+        }
+
+        String name = RouteNameValidator.normalize(rawName);
+
+        if (mRouteDb == null) {
+            GoUtils.DisplayToast(this, getResources().getString(R.string.route_draw_save_failed));
+            return;
+        }
+        if (DataBaseRoute.nameExists(mRouteDb, name)) {
+            GoUtils.DisplayToast(this,
+                    getResources().getString(R.string.route_draw_save_duplicate));
+            return;
+        }
+
+        long rowId = DataBaseRoute.insertRoute(
+                mRouteDb, name, mOverlay.isClosed(), mOverlay.getPoints());
+        if (rowId < 0) {
+            // 撞上 UNIQUE 约束（并发兜底）也走重名提示
+            GoUtils.DisplayToast(this, DataBaseRoute.nameExists(mRouteDb, name)
+                    ? getResources().getString(R.string.route_draw_save_duplicate)
+                    : getResources().getString(R.string.route_draw_save_failed));
+            return;
+        }
+
+        GoUtils.DisplayToast(this, getResources().getString(R.string.route_draw_save_ok));
+    }
+
+    private String describeNameProblem(RouteNameValidator.Problem problem) {
+        switch (problem) {
+            case TOO_LONG:
+                return getResources().getString(R.string.route_draw_name_too_long);
+            case CONTROL_CHAR:
+                return getResources().getString(R.string.route_draw_name_control_char);
+            case FORBIDDEN_CHAR:
+                return getResources().getString(R.string.route_draw_name_forbidden_char);
+            case EMPTY:
+            default:
+                return getResources().getString(R.string.route_draw_name_empty);
         }
     }
 
