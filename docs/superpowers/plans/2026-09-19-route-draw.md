@@ -1401,7 +1401,7 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
 - Modify: `app/src/main/res/values/strings.xml`
 
 **Interfaces:**
-- Produces: `RouteDrawActivity`，含字段 `mOverlay`、`mBaiduMap`、`mRouteDb`、`mStroke`(撤销栈)
+- Produces: `RouteDrawActivity`，含字段 `mMapView`、`mBaiduMap`、`mOverlay`、`mRouteDb`、`mLocClient`、`mUndoStack`（撤销栈；早先此处误写成 `mStroke`，那是绘制层内部的字段名，与本类无关）
 - 供 Task 8 使用的内部方法名：`applyMapGestures(boolean locked)`、`pushUndoSnapshot()`、`updateStatusText()`、`updateUndoButton()`。（Task 8 的 `undo()` 直接操作 `mUndoStack`，**不另设** `popUndoSnapshot()`——早先的 Interfaces 块误列过这个名字，实现里从不存在。）
 
 - [ ] **Step 1: 加字符串**
@@ -1469,12 +1469,14 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 面板收起时的入口 -->
+    <!-- 面板收起时的入口。
+         刻意放在 start|top：面板是 end 侧、match_parent 高、且在子视图列表里更靠后，
+         会盖住 end 侧的一切——放 end|top 的话面板一打开，收起按钮就被自己盖住，关不掉。 -->
     <Button
         android:id="@+id/route_draw_tools_toggle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|top"
+        android:layout_gravity="start|top"
         android:layout_margin="12dp"
         android:text="@string/route_draw_tools_toggle" />
 
@@ -1774,6 +1776,23 @@ public class RouteDrawActivity extends BaseActivity {
      *
      * <p>定位失败不拦路：停在默认中心，提示用户手动平移。
      */
+    /**
+     * 百度定位的失败码远多于成功码（TypeNone、TypeCriteriaException、TypeNetWorkException、
+     * TypeOffLineLocationFail、TypeServerError 等十余个），所以判定必须走**成功白名单**。
+     *
+     * <p>反过来的写法（白名单两三个失败码、其余当成功）会让绝大多数失败落到
+     * {@code animateMapStatus} 上：失败的 BDLocation 经纬度常为 0，相机会飞到几内亚湾，
+     * 而且不弹任何提示——用户只看到地图莫名跑到海上。
+     */
+    private static boolean isLocateSuccess(int locType) {
+        return locType == BDLocation.TypeGpsLocation
+                || locType == BDLocation.TypeGnssLocation
+                || locType == BDLocation.TypeNetWorkLocation
+                || locType == BDLocation.TypeCoarseLocation
+                || locType == BDLocation.TypeOffLineLocation
+                || locType == BDLocation.TypeCacheLocation;
+    }
+
     private void centerOnCurrentLocation() {
         try {
             mLocClient = new LocationClient(getApplicationContext());
@@ -1783,9 +1802,7 @@ public class RouteDrawActivity extends BaseActivity {
                     if (bdLocation == null || mBaiduMap == null) {
                         return;
                     }
-                    int locType = bdLocation.getLocType();
-                    if (locType == BDLocation.TypeCriteriaException
-                            || locType == BDLocation.TypeNetWorkException) {
+                    if (!isLocateSuccess(bdLocation.getLocType())) {
                         GoUtils.DisplayToast(RouteDrawActivity.this,
                                 getResources().getString(R.string.route_draw_locate_failed));
                         stopLocationClient();
