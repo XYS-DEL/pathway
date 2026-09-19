@@ -99,7 +99,10 @@ public class RouteDrawOverlayView extends View {
         mStrokePaint.setStyle(Paint.Style.STROKE);
         mStrokePaint.setStrokeWidth(mLineWidthPx);
         mStrokePaint.setStrokeCap(Paint.Cap.ROUND);
-        mStrokePaint.setColor(Color.parseColor("#99FF3F51B5"));
+        // 注意：Color.parseColor 只接受 #RRGGBB 或 #AARRGGBB 两种长度。
+        // 这里曾写成 "#99FF3F51B5"（10 位，alpha 写了两遍），运行期抛 Unknown color，
+        // 界面一打开就闪退——编译期查不出来。
+        mStrokePaint.setColor(Color.parseColor("#993F51B5"));
     }
 
     public void setOnRouteChangedListener(OnRouteChangedListener listener) {
