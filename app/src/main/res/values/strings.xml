@@ -182,8 +182,6 @@
     <!-- 绘制路线 -->
     <string name="app_route_draw">绘制路线</string>
     <string name="nav_menu_route_draw">绘制路线</string>
-    <string name="route_draw_tools_title">工具</string>
-    <string name="route_draw_tools_toggle">工具</string>
     <string name="route_draw_mode_point">点绘制</string>
     <string name="route_draw_mode_line">线绘制</string>
     <string name="route_draw_lock_map">锁定地图</string>

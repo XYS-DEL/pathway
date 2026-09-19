@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 可选中片的文字颜色：选中态用白色（对主题色 4.54:1，过 WCAG AA），
+     未选中用深色。原先是深色压主题色，只有 3.54:1，不达标。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="#FFFFFF" />
+    <item android:state_enabled="false" android:color="#61000000" />
+    <item android:color="#212121" />
+</selector>

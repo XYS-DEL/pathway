@@ -195,6 +195,14 @@ public class RouteDrawActivity extends BaseActivity {
      */
     private void initSearchView() {
         mSearchView = findViewById(R.id.route_draw_search);
+        // AppCompat 的 SearchView 只认 app 命名空间下的 iconifiedByDefault / queryHint，
+        // 写在 android: 前缀上会被静默忽略——那样渲染出来是一个折叠的放大镜图标，
+        // 提示文字也不会出现。MainActivity 同样是靠这两句显式展开的。
+        mSearchView.setIconifiedByDefault(false);
+        mSearchView.onActionViewExpanded();
+        // 提示文字同理：布局里没有 app 命名空间可用，只能在这里补上，
+        // 否则框内是一片空白（android:queryHint 已被删掉，它是死属性）。
+        mSearchView.setQueryHint(getString(R.string.route_draw_search_hint));
         mSuggestionList = findViewById(R.id.route_draw_suggestion_list);
         mSuggestionSearch = SuggestionSearch.newInstance();
 

@@ -10,6 +10,7 @@
     android:id="@+id/route_draw_tools"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
+    android:clickable="true"
     android:orientation="vertical">
 
     <TextView
@@ -19,6 +20,7 @@
         android:background="@drawable/bg_tool_chip"
         android:clickable="true"
         android:contentDescription="@string/route_draw_tools_collapse"
+        android:elevation="4dp"
         android:focusable="true"
         android:minWidth="44dp"
         android:paddingHorizontal="14dp"
@@ -42,10 +44,11 @@
             android:background="@drawable/bg_tool_chip_toggle"
             android:button="@null"
             android:checked="true"
+            android:elevation="4dp"
             android:paddingHorizontal="16dp"
             android:paddingVertical="10dp"
             android:text="@string/route_draw_mode_point"
-            android:textColor="#212121" />
+            android:textColor="@color/chip_text_toggle" />
 
         <RadioButton
             android:id="@+id/route_draw_mode_line"
@@ -54,10 +57,11 @@
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_tool_chip_toggle"
             android:button="@null"
+            android:elevation="4dp"
             android:paddingHorizontal="16dp"
             android:paddingVertical="10dp"
             android:text="@string/route_draw_mode_line"
-            android:textColor="#212121" />
+            android:textColor="@color/chip_text_toggle" />
     </RadioGroup>
 
     <CheckBox
@@ -68,10 +72,11 @@
         android:background="@drawable/bg_tool_chip_toggle"
         android:button="@null"
         android:checked="true"
+        android:elevation="4dp"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
         android:text="@string/route_draw_lock_map"
-        android:textColor="#212121" />
+        android:textColor="@color/chip_text_toggle" />
 
     <TextView
         android:id="@+id/route_draw_btn_densify"
@@ -80,6 +85,7 @@
         android:layout_marginTop="8dp"
         android:background="@drawable/bg_tool_chip"
         android:clickable="true"
+        android:elevation="4dp"
         android:focusable="true"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
@@ -93,6 +99,7 @@
         android:layout_marginTop="8dp"
         android:background="@drawable/bg_tool_chip"
         android:clickable="true"
+        android:elevation="4dp"
         android:focusable="true"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
@@ -106,6 +113,7 @@
         android:layout_marginTop="8dp"
         android:background="@drawable/bg_tool_chip"
         android:clickable="true"
+        android:elevation="4dp"
         android:focusable="true"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
@@ -119,6 +127,7 @@
         android:layout_marginTop="8dp"
         android:background="@drawable/bg_tool_chip_accent"
         android:clickable="true"
+        android:elevation="4dp"
         android:focusable="true"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"

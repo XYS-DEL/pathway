@@ -14,49 +14,9 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 顶部搜索栏。放在绘制层之后 —— 否则绘制层会吃掉触摸。 -->
-    <androidx.appcompat.widget.SearchView
-        android:id="@+id/route_draw_search"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:layout_marginStart="12dp"
-        android:layout_marginTop="12dp"
-        android:layout_marginEnd="80dp"
-        android:background="@drawable/bg_tool_chip"
-        android:iconifiedByDefault="false"
-        android:queryHint="@string/route_draw_search_hint" />
-
-    <!-- 图层切换：搜索栏的右下方。文字反映当前状态，点它会切到另一种。 -->
-    <TextView
-        android:id="@+id/route_draw_layer_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="68dp"
-        android:layout_marginEnd="12dp"
-        android:background="@drawable/bg_tool_chip"
-        android:clickable="true"
-        android:focusable="true"
-        android:paddingHorizontal="14dp"
-        android:paddingVertical="10dp"
-        android:text="@string/route_draw_layer_satellite"
-        android:textColor="#212121"
-        android:textSize="13sp" />
-
-    <!-- 搜索建议列表：同样在绘制层之后。默认隐藏，输入时才显示。 -->
-    <ListView
-        android:id="@+id/route_draw_suggestion_list"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:layout_marginStart="12dp"
-        android:layout_marginTop="76dp"
-        android:layout_marginEnd="80dp"
-        android:background="@drawable/bg_tool_chip"
-        android:visibility="gone" />
-
-    <!-- 左侧工具条。放在绘制层之后，才会先拿到触摸。
+    <!-- 左侧工具条。放在绘制层之后，才会先拿到触摸；
+         但必须排在下方的搜索建议列表之前 —— FrameLayout 按倒序派发，
+         后写的先拿到触点，列表只有这样才抢得回被工具条压住的那几行。
          布局参数必须写在这里：<include> 同时给出 layout_width 与 layout_height 时，
          参数完全取自本标签，被包含根的 gravity/margin 不会被读取
          （见 LayoutInflater.parseInclude）。 -->
@@ -66,6 +26,60 @@
         android:layout_height="wrap_content"
         android:layout_gravity="start|center_vertical"
         android:layout_marginStart="12dp" />
+
+    <!-- 顶部一列：搜索栏、图层按钮、搜索建议列表。
+         用一个纵向 LinearLayout 兜住这三块，它们的纵向位置就由前一个视图的实际高度决定，
+         不再写死 dp —— 搜索栏在 Java 里被显式展开后高度会变，写死的偏移立刻就错位了。
+         注意 FrameLayout 自身不支持 layout_below（FrameLayout.LayoutParams 只有 gravity，
+         见 javap），所以这里只能靠纵向 LinearLayout 来叠。
+         这一列整体排在工具条之后：里面的建议列表要压在工具条上面。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical">
+
+        <!-- 顶部搜索栏。放在绘制层之后 —— 否则绘制层会吃掉触摸。 -->
+        <androidx.appcompat.widget.SearchView
+            android:id="@+id/route_draw_search"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="80dp"
+            android:background="@drawable/bg_tool_chip" />
+
+        <!-- 图层切换：紧贴搜索栏下方。文字反映当前状态，点它会切到另一种。
+             在纵向 LinearLayout 里 layout_gravity 只取水平分量，end 即右对齐。 -->
+        <TextView
+            android:id="@+id/route_draw_layer_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/bg_tool_chip"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="10dp"
+            android:text="@string/route_draw_layer_satellite"
+            android:textColor="#212121"
+            android:textSize="13sp" />
+
+        <!-- 搜索建议列表：紧贴图层按钮下方。默认隐藏，输入时才显示。
+             不透明底色：否则底下的悬浮片会透上来，看着像叠在一起。 -->
+        <ListView
+            android:id="@+id/route_draw_suggestion_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="80dp"
+            android:background="#F2FFFFFF"
+            android:visibility="gone" />
+
+    </LinearLayout>
 
     <TextView
         android:id="@+id/route_draw_status"
