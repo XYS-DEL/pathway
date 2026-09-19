@@ -5,16 +5,17 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.MenuItem;
 import android.view.View;
-import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.RadioGroup;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.SearchView;
 
 import com.baidu.location.BDAbstractLocationListener;
 import com.baidu.location.BDLocation;
@@ -25,6 +26,9 @@ import com.baidu.mapapi.map.MapStatus;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
 import com.baidu.mapapi.map.MapView;
 import com.baidu.mapapi.model.LatLng;
+import com.baidu.mapapi.search.sug.SuggestionResult;
+import com.baidu.mapapi.search.sug.SuggestionSearch;
+import com.baidu.mapapi.search.sug.SuggestionSearchOption;
 import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.database.DataBaseRoute;
 import com.iterlocus.pathway.utils.GoUtils;
@@ -53,9 +57,18 @@ public class RouteDrawActivity extends BaseActivity {
     private BaiduMap mBaiduMap;
     private RouteDrawOverlayView mOverlay;
 
-    private ScrollView mToolsPanel;
     private TextView mStatusText;
-    private Button mUndoButton;
+    private TextView mUndoButton;
+
+    private SearchView mSearchView;
+    private ListView mSuggestionList;
+    private SuggestionSearch mSuggestionSearch;
+
+    /** 最近一次请求的关键字。用于丢弃过期响应：用户可能已经清空输入框或又改了字。 */
+    private String mPendingKeyword = "";
+
+    /** 当前是否为卫星图。默认 false，与 BaiduMap 的初始状态一致。 */
+    private boolean mSatellite;
 
     private SQLiteDatabase mRouteDb;
 
@@ -102,11 +115,11 @@ public class RouteDrawActivity extends BaseActivity {
         mOverlay.setBaiduMap(mBaiduMap);
         mOverlay.setOnRouteChangedListener(this::onRouteChanged);
 
-        mToolsPanel = findViewById(R.id.route_draw_tools);
         mStatusText = findViewById(R.id.route_draw_status);
         mUndoButton = findViewById(R.id.route_draw_btn_undo);
 
         findViewById(R.id.route_draw_tools_toggle).setOnClickListener(v -> toggleToolsPanel());
+        applyToolsCollapsed(false);
 
         RadioGroup modeGroup = findViewById(R.id.route_draw_mode_group);
         modeGroup.setOnCheckedChangeListener((group, checkedId) -> {
@@ -135,6 +148,9 @@ public class RouteDrawActivity extends BaseActivity {
 
         updateStatusText();
         updateUndoButton();
+
+        initSearchView();
+        initLayerButton();
     }
 
     @Override
@@ -152,6 +168,9 @@ public class RouteDrawActivity extends BaseActivity {
     @Override
     protected void onDestroy() {
         stopLocationClient();
+        if (mSuggestionSearch != null) {
+            mSuggestionSearch.destroy();
+        }
         mMapView.onDestroy();
         if (mRouteDb != null) {
             mRouteDb.close();
@@ -168,6 +187,106 @@ public class RouteDrawActivity extends BaseActivity {
         return super.onOptionsItemSelected(item);
     }
 
+    /**
+     * 顶部搜索：输入时向百度要建议，选中后把地图平移过去。
+     *
+     * <p>刻意不落标记、不弹信息窗、不写搜索历史——这是绘制界面，
+     * 落下的点会与正在画的路线混淆。
+     */
+    private void initSearchView() {
+        mSearchView = findViewById(R.id.route_draw_search);
+        // AppCompat 的 SearchView 只认 app 命名空间下的 iconifiedByDefault / queryHint，
+        // 写在 android: 前缀上会被静默忽略——那样渲染出来是一个折叠的放大镜图标，
+        // 提示文字也不会出现。MainActivity 同样是靠这两句显式展开的。
+        mSearchView.setIconifiedByDefault(false);
+        mSearchView.onActionViewExpanded();
+        // 提示文字同理：布局里没有 app 命名空间可用，只能在这里补上，
+        // 否则框内是一片空白（android:queryHint 已被删掉，它是死属性）。
+        mSearchView.setQueryHint(getString(R.string.route_draw_search_hint));
+        mSuggestionList = findViewById(R.id.route_draw_suggestion_list);
+        mSuggestionSearch = SuggestionSearch.newInstance();
+
+        final List<SuggestionResult.SuggestionInfo> suggestions = new ArrayList<>();
+        final ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this, android.R.layout.simple_list_item_1, new ArrayList<String>());
+        mSuggestionList.setAdapter(adapter);
+
+        mSuggestionSearch.setOnGetSuggestionResultListener(result -> {
+            // 丢弃过期响应：输入框已清空、或关键字已被改掉时，
+            // 这个响应不该再影响界面——否则列表会在用户已经清空或跳走之后凭空弹出。
+            // 注意这段必须在清空 suggestions/adapter 之前 return，否则列表会先闪一下变空。
+            CharSequence query = mSearchView.getQuery();
+            String current = query == null ? "" : query.toString().trim();
+            if (current.isEmpty() || !current.equals(mPendingKeyword)) {
+                return;
+            }
+
+            suggestions.clear();
+            adapter.clear();
+            if (result == null || result.getAllSuggestions() == null) {
+                mSuggestionList.setVisibility(View.GONE);
+                return;
+            }
+            for (SuggestionResult.SuggestionInfo info : result.getAllSuggestions()) {
+                // 没有坐标的条目（如纯行政区划）跳过，否则点了无处可去
+                if (info == null || info.pt == null) {
+                    continue;
+                }
+                suggestions.add(info);
+                adapter.add(info.key);
+            }
+            mSuggestionList.setVisibility(suggestions.isEmpty() ? View.GONE : View.VISIBLE);
+        });
+
+        mSearchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String query) {
+                return false;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String newText) {
+                if (newText == null || newText.trim().isEmpty()) {
+                    mSuggestionList.setVisibility(View.GONE);
+                    return false;
+                }
+                mPendingKeyword = newText.trim();
+                mSuggestionSearch.requestSuggestion(new SuggestionSearchOption()
+                        .city(MainActivity.mCurrentCity == null ? "" : MainActivity.mCurrentCity)
+                        .keyword(newText));
+                return true;
+            }
+        });
+
+        mSuggestionList.setOnItemClickListener((parent, view, position, id) -> {
+            SuggestionResult.SuggestionInfo picked = suggestions.get(position);
+            mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newMapStatus(
+                    new MapStatus.Builder().target(picked.pt).zoom(18.0f).build()));
+            mSuggestionList.setVisibility(View.GONE);
+            mSearchView.setQuery("", false);
+            mSearchView.clearFocus();
+        });
+    }
+
+    /** 图层切换：普通图 ↔ 卫星图。按钮文字显示的是「点它会切到哪」。 */
+    private void initLayerButton() {
+        TextView button = findViewById(R.id.route_draw_layer_button);
+        updateLayerButtonText(button);
+        button.setOnClickListener(v -> {
+            mSatellite = !mSatellite;
+            mBaiduMap.setMapType(mSatellite
+                    ? BaiduMap.MAP_TYPE_SATELLITE
+                    : BaiduMap.MAP_TYPE_NORMAL);
+            updateLayerButtonText(button);
+        });
+    }
+
+    private void updateLayerButtonText(TextView button) {
+        button.setText(mSatellite
+                ? R.string.route_draw_layer_normal
+                : R.string.route_draw_layer_satellite);
+    }
+
     /** 锁定时关掉地图自身的手势，触摸全归绘制层；解锁后相反。 */
     private void applyMapGestures(boolean locked) {
         if (mBaiduMap != null) {
@@ -175,9 +294,35 @@ public class RouteDrawActivity extends BaseActivity {
         }
     }
 
+    /**
+     * 折叠/展开工具条。箭头片常驻，其余片随之一并隐藏。
+     *
+     * <p>箭头方向即「点了会往哪边动」：展开时指左（收起），收起时指右（展开）。
+     *
+     * <p>折叠状态从模式片的可见性反推：工具条根布局就是那片 LinearLayout 本身，
+     * 不再为它单独留一个字段（多一份状态就多一处可能不同步的地方）。
+     */
     private void toggleToolsPanel() {
-        boolean visible = mToolsPanel.getVisibility() == View.VISIBLE;
-        mToolsPanel.setVisibility(visible ? View.GONE : View.VISIBLE);
+        boolean collapsed = findViewById(R.id.route_draw_mode_group).getVisibility() != View.VISIBLE;
+        applyToolsCollapsed(!collapsed);
+    }
+
+    private void applyToolsCollapsed(boolean collapsed) {
+        int visibility = collapsed ? View.GONE : View.VISIBLE;
+        findViewById(R.id.route_draw_mode_group).setVisibility(visibility);
+        findViewById(R.id.route_draw_lock_map).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_densify).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_undo).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_clear).setVisibility(visibility);
+        findViewById(R.id.route_draw_btn_finish).setVisibility(visibility);
+
+        TextView toggle = findViewById(R.id.route_draw_tools_toggle);
+        toggle.setText(collapsed
+                ? R.string.route_draw_arrow_expand
+                : R.string.route_draw_arrow_collapse);
+        toggle.setContentDescription(getResources().getString(collapsed
+                ? R.string.route_draw_tools_expand
+                : R.string.route_draw_tools_collapse));
     }
 
     private void onRouteChanged() {

@@ -182,8 +182,6 @@
     <!-- 绘制路线 -->
     <string name="app_route_draw">绘制路线</string>
     <string name="nav_menu_route_draw">绘制路线</string>
-    <string name="route_draw_tools_title">工具</string>
-    <string name="route_draw_tools_toggle">工具</string>
     <string name="route_draw_mode_point">点绘制</string>
     <string name="route_draw_mode_line">线绘制</string>
     <string name="route_draw_lock_map">锁定地图</string>
@@ -217,4 +215,13 @@
     <string name="route_draw_status_line">线绘制：按住拖动描绘；松手时靠近起点可闭合</string>
     <string name="route_draw_point_count">已绘制 %1$d 个点</string>
     <string name="route_draw_locate_failed">定位失败，请解锁地图后手动平移到目标区域</string>
+
+    <!-- 绘制路线 · 改版 -->
+    <string name="route_draw_tools_collapse">收起工具</string>
+    <string name="route_draw_tools_expand">展开工具</string>
+    <string name="route_draw_arrow_collapse">‹</string>
+    <string name="route_draw_arrow_expand">›</string>
+    <string name="route_draw_search_hint">搜索地点</string>
+    <string name="route_draw_layer_satellite">卫星图</string>
+    <string name="route_draw_layer_normal">普通图</string>
 </resources>

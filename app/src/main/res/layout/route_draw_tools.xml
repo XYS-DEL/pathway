@@ -1,77 +1,138 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="200dp"
-    android:layout_height="match_parent"
-    android:background="#F2FFFFFF"
-    android:visibility="gone">
+<!-- 左侧工具条：独立悬浮片，无底板。
+     箭头片常驻（收起后只剩它）；其余片随折叠一并 GONE。
+     模式选择与锁定开关用 android:button="@null" 隐去系统自带的圆点/勾选框，
+     只靠 bg_tool_chip_toggle 的选中态表达。 -->
+<!-- 位置（gravity / marginStart）由引入方在 <include> 标签上声明，本根不声明：
+     当 <include> 同时带 layout_width 与 layout_height 时，布局参数完全取自标签，
+     根的 gravity/margin 不会被读取（见 LayoutInflater.parseInclude）。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/route_draw_tools"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:clickable="true"
+    android:orientation="vertical">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <TextView
+        android:id="@+id/route_draw_tools_toggle"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="12dp">
+        android:background="@drawable/bg_tool_chip"
+        android:clickable="true"
+        android:contentDescription="@string/route_draw_tools_collapse"
+        android:elevation="4dp"
+        android:focusable="true"
+        android:minWidth="44dp"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_arrow_collapse"
+        android:textColor="@color/chip_text"
+        android:textSize="18sp"
+        android:textStyle="bold" />
 
-        <TextView
+    <RadioGroup
+        android:id="@+id/route_draw_mode_group"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/route_draw_mode_point"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/route_draw_tools_title"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <RadioGroup
-            android:id="@+id/route_draw_mode_group"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="vertical">
-
-            <RadioButton
-                android:id="@+id/route_draw_mode_point"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:text="@string/route_draw_mode_point" />
-
-            <RadioButton
-                android:id="@+id/route_draw_mode_line"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/route_draw_mode_line" />
-        </RadioGroup>
-
-        <CheckBox
-            android:id="@+id/route_draw_lock_map"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_tool_chip_toggle"
+            android:button="@null"
             android:checked="true"
-            android:text="@string/route_draw_lock_map" />
+            android:elevation="4dp"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp"
+            android:text="@string/route_draw_mode_point"
+            android:textColor="@color/chip_text_toggle" />
 
-        <Button
-            android:id="@+id/route_draw_btn_densify"
-            android:layout_width="match_parent"
+        <RadioButton
+            android:id="@+id/route_draw_mode_line"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="@string/route_draw_btn_densify" />
+            android:background="@drawable/bg_tool_chip_toggle"
+            android:button="@null"
+            android:elevation="4dp"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp"
+            android:text="@string/route_draw_mode_line"
+            android:textColor="@color/chip_text_toggle" />
+    </RadioGroup>
 
-        <Button
-            android:id="@+id/route_draw_btn_undo"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/route_draw_btn_undo" />
+    <CheckBox
+        android:id="@+id/route_draw_lock_map"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_tool_chip_toggle"
+        android:button="@null"
+        android:checked="true"
+        android:elevation="4dp"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_lock_map"
+        android:textColor="@color/chip_text_toggle" />
 
-        <Button
-            android:id="@+id/route_draw_btn_clear"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/route_draw_btn_clear" />
+    <TextView
+        android:id="@+id/route_draw_btn_densify"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_tool_chip"
+        android:clickable="true"
+        android:elevation="4dp"
+        android:focusable="true"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_btn_densify"
+        android:textColor="@color/chip_text" />
 
-        <Button
-            android:id="@+id/route_draw_btn_finish"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/route_draw_btn_finish" />
+    <TextView
+        android:id="@+id/route_draw_btn_undo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_tool_chip"
+        android:clickable="true"
+        android:elevation="4dp"
+        android:focusable="true"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_btn_undo"
+        android:textColor="@color/chip_text" />
 
-    </LinearLayout>
-</ScrollView>
+    <TextView
+        android:id="@+id/route_draw_btn_clear"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_tool_chip"
+        android:clickable="true"
+        android:elevation="4dp"
+        android:focusable="true"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_btn_clear"
+        android:textColor="@color/chip_text" />
+
+    <TextView
+        android:id="@+id/route_draw_btn_finish"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_tool_chip_accent"
+        android:clickable="true"
+        android:elevation="4dp"
+        android:focusable="true"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:text="@string/route_draw_btn_finish"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold" />
+
+</LinearLayout>

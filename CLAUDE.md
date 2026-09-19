@@ -148,6 +148,18 @@ Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the orig
   且绘制层消费触摸，解锁后相反。
 - `RouteDrawActivity` 含 `MapView`，必须转发 `onResume`/`onPause`/`onDestroy`；
   且保持默认启动模式。
+
+**界面层（2026-09-19 改版）**：顶部搜索栏（百度 `SuggestionSearch`，选中只平移地图、不落标记、不写历史）、左侧可折叠的悬浮片工具条、搜索栏右下方的图层切换。三块背景 drawable 是 `bg_tool_chip`（含禁用态与按压态）、`bg_tool_chip_toggle`（可选中片，选中态填充主题色）、`bg_tool_chip_accent`（主操作片），文字色用 `res/color/chip_text` 与 `res/color/chip_text_toggle`。
+
+三个容易重踩的坑：
+
+- **AppCompat 的 `SearchView` 只认 app 命名空间的 `iconifiedByDefault` / `queryHint`。** 写成 `android:` 前缀会被**静默忽略**——不报错、不警告，渲染出来是一个折叠的放大镜图标且提示文字不出现。展开与提示必须在 Java 里设（`setIconifiedByDefault(false)` + `onActionViewExpanded()` + `setQueryHint(...)`，`MainActivity` 就是这么做的）。注意仓库里其它 `SearchView` 用的是**框架**的 `android.widget.SearchView`，那里 `android:queryHint` 是对的——别照抄。
+- **`SearchView` 自带 `queryBackground` 底板会画在我们设的 `android:background` 之上**，产生两个形状不匹配的白块。必须用 `app:queryBackground="@null"` 关掉。
+- **`<include>` 标签同时带 `layout_width` 与 `layout_height` 时，布局参数完全取自标签**，被包含根声明的 `layout_gravity` / `layout_marginStart` 不会被读取（`LayoutInflater.parseInclude`）。位置属性要写在 `<include>` 上。
+
+**不做真背景模糊**：百度地图渲染在 `SurfaceView` 上（`MapView` 内部 `MapSurfaceView` → `ah`(RenderSurfaceView) → `android.view.SurfaceView`），其像素由系统合成器在独立图层绘制、不经过 View 绘制树，`RenderEffect` 糊不到它；`Window.setBackgroundBlurRadius` 糊的是窗口背后而地图在本窗口内部，同样不通。悬浮片是半透明白 + 圆角 + 描边 + elevation 做出来的观感。
+
+**界面改动必须用截图验收。** 编译、lint、单元测试都覆盖不到布局与配色；本项目已有一次实例——终审读了字节码与 AAR 资源后判定 `SearchView` 底板"顶多是一道浅缝"，实际截图显示是一大块形状不匹配的白块。`RouteDrawActivity` 未导出，`adb` 拉不起来，需人工打开后 `adb exec-out screencap -p` 截图。
 - **`RouteDrawActivity` 锁竖屏**（manifest 的 `screenOrientation="portrait"`）：它持有 `MapView`、
   GL 覆盖层与一次性定位客户端，旋转会重建 Activity，把用户正在画的那条路线连同撤销栈一起丢掉。
   代价是画不了横屏——若日后要放开，应先做点集持久化，而不是直接删掉这行。
