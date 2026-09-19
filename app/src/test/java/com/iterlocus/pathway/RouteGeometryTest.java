@@ -1,6 +1,7 @@
 package com.iterlocus.pathway;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import com.baidu.mapapi.model.LatLng;
 
@@ -65,5 +66,80 @@ public class RouteGeometryTest {
         assertEquals(0d, RouteGeometry.totalLengthMeters(new ArrayList<>(), false), 1e-9);
         assertEquals(0d, RouteGeometry.totalLengthMeters(
                 Collections.singletonList(new LatLng(1, 1)), true), 1e-9);
+    }
+
+    @Test
+    public void densifyAddsExactlyRequestedCount() {
+        List<LatLng> line = Arrays.asList(new LatLng(0, 0), new LatLng(1, 0));
+        assertEquals(5, RouteGeometry.densify(line, false, 3).size());
+    }
+
+    @Test
+    public void densifyPlacesNewPointsEvenlyByTotalLength() {
+        List<LatLng> line = Arrays.asList(new LatLng(0, 0), new LatLng(1, 0));
+        List<LatLng> result = RouteGeometry.densify(line, false, 3);
+        assertEquals(0.25, result.get(1).latitude, 1e-6);
+        assertEquals(0.50, result.get(2).latitude, 1e-6);
+        assertEquals(0.75, result.get(3).latitude, 1e-6);
+    }
+
+    @Test
+    public void densifyKeepsOriginalVertices() {
+        List<LatLng> corner = Arrays.asList(new LatLng(0, 0), new LatLng(0, 1), new LatLng(1, 1));
+        List<LatLng> result = RouteGeometry.densify(corner, false, 4);
+        assertTrue(contains(result, new LatLng(0, 0)));
+        assertTrue(contains(result, new LatLng(0, 1)));
+        assertTrue(contains(result, new LatLng(1, 1)));
+        assertEquals(3 + 4, result.size());
+    }
+
+    @Test
+    public void densifyResultLiesOnTheOriginalRoute() {
+        List<LatLng> corner = Arrays.asList(new LatLng(0, 0), new LatLng(0, 1), new LatLng(1, 1));
+        List<LatLng> result = RouteGeometry.densify(corner, false, 5);
+        double walked = 0d;
+        for (int i = 1; i < result.size(); i++) {
+            walked += RouteGeometry.distanceMeters(result.get(i - 1), result.get(i));
+        }
+        assertEquals(RouteGeometry.totalLengthMeters(corner, false), walked, 1d);
+    }
+
+    @Test
+    public void densifyIsNoOpForNonPositiveCountOrTooFewPoints() {
+        List<LatLng> line = Arrays.asList(new LatLng(0, 0), new LatLng(1, 0));
+        assertEquals(2, RouteGeometry.densify(line, false, 0).size());
+        assertEquals(2, RouteGeometry.densify(line, false, -5).size());
+        assertEquals(1, RouteGeometry.densify(
+                Collections.singletonList(new LatLng(0, 0)), false, 3).size());
+        assertEquals(0, RouteGeometry.densify(null, false, 3).size());
+    }
+
+    @Test
+    public void densifyIsNoOpWhenTotalLengthIsZero() {
+        List<LatLng> samePoint = Arrays.asList(new LatLng(1, 1), new LatLng(1, 1));
+        assertEquals(2, RouteGeometry.densify(samePoint, false, 5).size());
+    }
+
+    @Test
+    public void densifyWrapsAroundWhenClosed() {
+        List<LatLng> square = Arrays.asList(
+                new LatLng(0, 0), new LatLng(0, 1), new LatLng(1, 1), new LatLng(1, 0));
+        List<LatLng> result = RouteGeometry.densify(square, true, 8);
+        assertEquals(4 + 8, result.size());
+        double walked = 0d;
+        for (int i = 1; i < result.size(); i++) {
+            walked += RouteGeometry.distanceMeters(result.get(i - 1), result.get(i));
+        }
+        assertTrue("闭合密化后应走满一圈", walked > RouteGeometry.totalLengthMeters(square, false));
+    }
+
+    private static boolean contains(List<LatLng> points, LatLng target) {
+        for (LatLng p : points) {
+            if (Math.abs(p.latitude - target.latitude) < 1e-9
+                    && Math.abs(p.longitude - target.longitude) < 1e-9) {
+                return true;
+            }
+        }
+        return false;
     }
 }
