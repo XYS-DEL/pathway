@@ -14,6 +14,31 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- 顶部搜索栏。放在绘制层之后 —— 否则绘制层会吃掉触摸。 -->
+    <androidx.appcompat.widget.SearchView
+        android:id="@+id/route_draw_search"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="80dp"
+        android:background="@drawable/bg_tool_chip"
+        android:iconifiedByDefault="false"
+        android:queryHint="@string/route_draw_search_hint" />
+
+    <!-- 搜索建议列表：同样在绘制层之后。默认隐藏，输入时才显示。 -->
+    <ListView
+        android:id="@+id/route_draw_suggestion_list"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="76dp"
+        android:layout_marginEnd="80dp"
+        android:background="@drawable/bg_tool_chip"
+        android:visibility="gone" />
+
     <!-- 左侧工具条。放在绘制层之后，才会先拿到触摸。
          布局参数必须写在这里：<include> 同时给出 layout_width 与 layout_height 时，
          参数完全取自本标签，被包含根的 gravity/margin 不会被读取

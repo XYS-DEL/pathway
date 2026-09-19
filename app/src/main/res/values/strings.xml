@@ -223,4 +223,5 @@
     <string name="route_draw_tools_expand">展开工具</string>
     <string name="route_draw_arrow_collapse">‹</string>
     <string name="route_draw_arrow_expand">›</string>
+    <string name="route_draw_search_hint">搜索地点</string>
 </resources>

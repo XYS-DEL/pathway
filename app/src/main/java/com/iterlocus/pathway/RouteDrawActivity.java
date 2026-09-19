@@ -5,14 +5,17 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.SearchView;
 
 import com.baidu.location.BDAbstractLocationListener;
 import com.baidu.location.BDLocation;
@@ -23,6 +26,9 @@ import com.baidu.mapapi.map.MapStatus;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
 import com.baidu.mapapi.map.MapView;
 import com.baidu.mapapi.model.LatLng;
+import com.baidu.mapapi.search.sug.SuggestionResult;
+import com.baidu.mapapi.search.sug.SuggestionSearch;
+import com.baidu.mapapi.search.sug.SuggestionSearchOption;
 import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.database.DataBaseRoute;
 import com.iterlocus.pathway.utils.GoUtils;
@@ -53,6 +59,10 @@ public class RouteDrawActivity extends BaseActivity {
 
     private TextView mStatusText;
     private TextView mUndoButton;
+
+    private SearchView mSearchView;
+    private ListView mSuggestionList;
+    private SuggestionSearch mSuggestionSearch;
 
     private SQLiteDatabase mRouteDb;
 
@@ -132,6 +142,8 @@ public class RouteDrawActivity extends BaseActivity {
 
         updateStatusText();
         updateUndoButton();
+
+        initSearchView();
     }
 
     @Override
@@ -149,6 +161,7 @@ public class RouteDrawActivity extends BaseActivity {
     @Override
     protected void onDestroy() {
         stopLocationClient();
+        mSuggestionSearch.destroy();
         mMapView.onDestroy();
         if (mRouteDb != null) {
             mRouteDb.close();
@@ -163,6 +176,69 @@ public class RouteDrawActivity extends BaseActivity {
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    /**
+     * 顶部搜索：输入时向百度要建议，选中后把地图平移过去。
+     *
+     * <p>刻意不落标记、不弹信息窗、不写搜索历史——这是绘制界面，
+     * 落下的点会与正在画的路线混淆。
+     */
+    private void initSearchView() {
+        mSearchView = findViewById(R.id.route_draw_search);
+        mSuggestionList = findViewById(R.id.route_draw_suggestion_list);
+        mSuggestionSearch = SuggestionSearch.newInstance();
+
+        final List<SuggestionResult.SuggestionInfo> suggestions = new ArrayList<>();
+        final ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this, android.R.layout.simple_list_item_1, new ArrayList<String>());
+        mSuggestionList.setAdapter(adapter);
+
+        mSuggestionSearch.setOnGetSuggestionResultListener(result -> {
+            suggestions.clear();
+            adapter.clear();
+            if (result == null || result.getAllSuggestions() == null) {
+                mSuggestionList.setVisibility(View.GONE);
+                return;
+            }
+            for (SuggestionResult.SuggestionInfo info : result.getAllSuggestions()) {
+                // 没有坐标的条目（如纯行政区划）跳过，否则点了无处可去
+                if (info == null || info.pt == null) {
+                    continue;
+                }
+                suggestions.add(info);
+                adapter.add(info.key);
+            }
+            mSuggestionList.setVisibility(suggestions.isEmpty() ? View.GONE : View.VISIBLE);
+        });
+
+        mSearchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String query) {
+                return false;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String newText) {
+                if (newText == null || newText.trim().isEmpty()) {
+                    mSuggestionList.setVisibility(View.GONE);
+                    return false;
+                }
+                mSuggestionSearch.requestSuggestion(new SuggestionSearchOption()
+                        .city(MainActivity.mCurrentCity == null ? "" : MainActivity.mCurrentCity)
+                        .keyword(newText));
+                return true;
+            }
+        });
+
+        mSuggestionList.setOnItemClickListener((parent, view, position, id) -> {
+            SuggestionResult.SuggestionInfo picked = suggestions.get(position);
+            mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newMapStatus(
+                    new MapStatus.Builder().target(picked.pt).zoom(18.0f).build()));
+            mSuggestionList.setVisibility(View.GONE);
+            mSearchView.setQuery("", false);
+            mSearchView.clearFocus();
+        });
     }
 
     /** 锁定时关掉地图自身的手势，触摸全归绘制层；解锁后相反。 */
