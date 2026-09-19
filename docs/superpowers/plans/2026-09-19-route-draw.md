@@ -1402,7 +1402,7 @@ git commit -m "feat: 路线绘制层（投影换算、点/线两种手势、闭�
 
 **Interfaces:**
 - Produces: `RouteDrawActivity`，含字段 `mOverlay`、`mBaiduMap`、`mRouteDb`、`mStroke`(撤销栈)
-- 供 Task 8 使用的内部方法名：`applyMapGestures(boolean locked)`、`pushUndoSnapshot()`、`popUndoSnapshot()`
+- 供 Task 8 使用的内部方法名：`applyMapGestures(boolean locked)`、`pushUndoSnapshot()`、`updateStatusText()`、`updateUndoButton()`。（Task 8 的 `undo()` 直接操作 `mUndoStack`，**不另设** `popUndoSnapshot()`——早先的 Interfaces 块误列过这个名字，实现里从不存在。）
 
 - [ ] **Step 1: 加字符串**
 
