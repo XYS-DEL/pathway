@@ -119,7 +119,9 @@ A custom overlay `View` added to the `WindowManager` (not part of any activity l
 
 ### Persistence
 
-Two independent `SQLiteOpenHelper`s, `HistoryLocation.db` and `HistorySearch.db`, both `DB_VERSION = 1` with a destructive `onUpgrade` (drop + recreate). Save helpers are `static` and dedupe by deleting matching rows before inserting (location keyed on WGS84 lng/lat, search keyed on the query string). `HistoryActivity` can apply a random offset (meters → degrees, ±`setting_lat_max_offset` / `setting_lon_max_offset`) when a history entry is tapped.
+Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the original two), plus `RouteConfig.db` for drawn routes. All are `DB_VERSION = 1` with a destructive `onUpgrade` (drop + recreate). Save helpers are `static` and dedupe by deleting matching rows before inserting (location keyed on WGS84 lng/lat, search keyed on the query string, route keyed on a `COLLATE NOCASE UNIQUE` name column). `HistoryActivity` can apply a random offset (meters → degrees, ±`setting_lat_max_offset` / `setting_lon_max_offset`) when a history entry is tapped.
+
+**DDL error handling is the one deliberate exception to "log and degrade".** Runtime data paths (`query`/`insert`/encode/decode) must log via `XLog.e` and return a safe value rather than throw — that is the project-wide convention. `onCreate`/`onUpgrade` instead **log and rethrow**: a malformed `CREATE TABLE` is a programming error, not a runtime read/write failure, and swallowing it leaves a table-less database whose every later save fails silently and permanently. `DataBaseRoute` implements this shape; the two older helpers still have unguarded `onCreate`/`onUpgrade`, so the `database` package currently carries two idioms — follow `DataBaseRoute`.
 
 ### Preferences
 
