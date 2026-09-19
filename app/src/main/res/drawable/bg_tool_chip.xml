@@ -3,15 +3,18 @@
      不做真模糊——地图渲染在 SurfaceView 的独立图层上，RenderEffect 看不见它。
      这条描边是「玻璃片」观感的关键，别去掉。
      禁用态必须与常态有可见差别：撤销按钮会在栈空时 setEnabled(false)，
-     若背景不变，用户看到的是一个能点却没反应的按钮。 -->
+     若背景不变，用户看到的是一个能点却没反应的按钮。
+     但差别只能来自「更淡」，不能淡到胶囊消失 —— 原来的 #66FFFFFF 压在浅色地图上
+     几乎与底色一致，禁用片就成了一行悬空的文字，整屏的悬浮片语言就断了。
+     所以实底与描边都上调，仍明显淡于常态的 #E0FFFFFF。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_enabled="false">
         <shape android:shape="rectangle">
-            <solid android:color="#66FFFFFF" />
+            <solid android:color="#99FFFFFF" />
             <corners android:radius="22dp" />
             <stroke
                 android:width="1dp"
-                android:color="#33FFFFFF" />
+                android:color="#4DFFFFFF" />
         </shape>
     </item>
     <item android:state_pressed="true">

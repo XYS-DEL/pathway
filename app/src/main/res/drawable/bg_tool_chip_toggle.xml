@@ -31,6 +31,20 @@
                 android:color="#80FFFFFF" />
         </shape>
     </item>
+    <!-- 禁用态。位置只能在「按下态之后、兜底项之前」：
+         选择器取**第一条匹配**，所以要排在选中/按下两条后面，它们的优先级才不变
+         （禁用的选中片仍显示为选中，用户才分得清「选中但不可点」与「没选中」）；
+         又必须排在最后那条无状态兜底项前面 —— 无状态项匹配一切，写它后面就是死代码。
+         色值与 bg_tool_chip 的禁用意一致：淡，但胶囊还在。 -->
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#99FFFFFF" />
+            <corners android:radius="22dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#4DFFFFFF" />
+        </shape>
+    </item>
     <item>
         <shape android:shape="rectangle">
             <solid android:color="#E0FFFFFF" />
