@@ -29,14 +29,40 @@ public final class RouteGeometry {
 
     /** 两点间测地距离（haversine），单位米。 */
     public static double distanceMeters(LatLng a, LatLng b) {
-        double lat1 = Math.toRadians(a.latitude);
-        double lat2 = Math.toRadians(b.latitude);
-        double dLat = lat2 - lat1;
-        double dLng = Math.toRadians(b.longitude - a.longitude);
-        double sinLat = Math.sin(dLat / 2);
-        double sinLng = Math.sin(dLng / 2);
-        double h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+        return distanceMeters(a.longitude, a.latitude, b.longitude, b.latitude);
+    }
+
+    /**
+     * 两点间测地距离（haversine），单位米。
+     *
+     * <p>入参顺序是 <b>(经度, 纬度)</b>，与 {@link com.iterlocus.pathway.utils.MapUtils#bd2wgs(double, double)} 一致；
+     * 而百度 {@code LatLng} 的构造是 (纬度, 经度)。本项目已因坐标系踩过坑，别写反。
+     */
+    public static double distanceMeters(double lng1, double lat1, double lng2, double lat2) {
+        double phi1 = Math.toRadians(lat1);
+        double phi2 = Math.toRadians(lat2);
+        double dPhi = phi2 - phi1;
+        double dLambda = Math.toRadians(lng2 - lng1);
+        double sinLat = Math.sin(dPhi / 2);
+        double sinLng = Math.sin(dLambda / 2);
+        double h = sinLat * sinLat + Math.cos(phi1) * Math.cos(phi2) * sinLng * sinLng;
         return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1.0, Math.sqrt(h)));
+    }
+
+    /**
+     * 起点指向终点的初始方位角，度，取值 [0, 360)。两点重合时返回 0。
+     *
+     * <p>用标准 initial bearing 公式而不是平面 atan2：{@code Location.setBearing()} 会被
+     * 目标 App 读取，值得算对；而且平面算法在经度跨 ±180° 时会给出反向航向。
+     */
+    public static double initialBearingDegrees(double lng1, double lat1, double lng2, double lat2) {
+        double phi1 = Math.toRadians(lat1);
+        double phi2 = Math.toRadians(lat2);
+        double dLambda = Math.toRadians(lng2 - lng1);
+        double y = Math.sin(dLambda) * Math.cos(phi2);
+        double x = Math.cos(phi1) * Math.sin(phi2)
+                - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+        return (Math.toDegrees(Math.atan2(y, x)) + 360d) % 360d;
     }
 
     /** 折线总长，单位米。点数不足 2 时为 0；closed 时把末点→首点那段算进去。 */
