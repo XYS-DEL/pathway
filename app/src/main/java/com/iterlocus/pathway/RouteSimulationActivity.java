@@ -177,6 +177,9 @@ public class RouteSimulationActivity extends BaseActivity {
         // （用户点「开始模拟」得到「请先选一条路线」），而 RadioGroup 的档位却被框架恢复了——
         // 这种不对称会被读成 bug。
         // 此时 loadRoutes() 已在 onCreate 里跑完，mRows 与 mAdapter 都已就绪。
+        //
+        // 存索引之所以安全，是因为 queryAll 的排序是确定的（orderBy = CREATED_AT DESC）。
+        // 若日后改了那个排序，这里必须改成按名字恢复——否则旋转后会静默选中另一条路线。
         int index = savedInstanceState.getInt(STATE_SELECTED_INDEX, -1);
         if (index >= 0 && index < mRows.size()) {
             mSelectedIndex = index;
