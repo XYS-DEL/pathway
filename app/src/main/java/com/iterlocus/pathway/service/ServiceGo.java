@@ -73,8 +73,8 @@ public class ServiceGo extends Service {
     /** 当前路线。null 表示没有路线在跑。定位线程读、UI 线程写，故 volatile。 */
     private volatile RoutePlayer mRoutePlayer;
     private volatile String mRouteName;
-    /** 上一 tick 的时刻，用于算真实的 dt。 */
-    private long mLastTickMs;
+    /** 上一 tick 的时刻，用于算真实的 dt。主线程写（onCreate / startRoute）、定位线程读写，故 volatile。 */
+    private volatile long mLastTickMs;
     /** 主线程 Handler：摇杆是 View，只能在主线程碰。 */
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
 
@@ -242,25 +242,41 @@ public class ServiceGo extends Service {
      * onRouteFinished() 里做。
      */
     private void advanceRoute() {
+        // 取时钟与推进 tick 基准留在 try 外：这两行是纯算术、不会抛，
+        // 而 mLastTickMs 必须无条件每 tick 前移，否则一旦某 tick 抛异常，
+        // 基准就会停在过去，之后每次 dt 都吃满 MAX_TICK_SECONDS。
         long now = SystemClock.elapsedRealtime();
         double dt = Math.min((now - mLastTickMs) / 1000.0, MAX_TICK_SECONDS);
         mLastTickMs = now;
 
-        RoutePlayer player = mRoutePlayer;
-        if (player == null || player.isFinished()) {
-            return;
-        }
+        try {
+            RoutePlayer player = mRoutePlayer;
+            if (player == null || player.isFinished()) {
+                return;
+            }
 
-        player.advance(dt);
+            player.advance(dt);
 
-        double[] position = player.getPosition();
-        if (position == null) {
-            return;
+            double[] position = player.getPosition();
+            if (position == null) {
+                return;
+            }
+            // 这期间 UI 线程可能已经 stopRoute() 并瞬移走（setPosition 会先停路线）。
+            // 不复检的话，这次回写会盖掉瞬移目标，而彼时 mRoutePlayer 已为 null，
+            // 后续 tick 不会再纠正——瞬移就静默丢了。
+            if (mRoutePlayer != player) {
+                return;
+            }
+            mCurLng = position[0];
+            mCurLat = position[1];
+            mCurBea = (float) player.getBearing();
+            mSpeed = player.getSpeed();
+        } catch (Exception e) {
+            // handleMessage 的 try 只接 InterruptedException：异常若逃出去会杀死
+            // 定位线程的 Looper——isStop 仍是 false、前台通知还挂着、被 mock 的位置
+            // 冻在最后一个值，且一行日志都没有。那是本 App 最坏的失效模式。
+            XLog.e("SERVICEGO: ERROR - advanceRoute");
         }
-        mCurLng = position[0];
-        mCurLat = position[1];
-        mCurBea = (float) player.getBearing();
-        mSpeed = player.getSpeed();
     }
 
     /** 把摇杆内置地图同步到当前位置。只能在主线程碰这些 View。 */
@@ -407,8 +423,11 @@ public class ServiceGo extends Service {
 
     public class ServiceGoBinder extends Binder {
         public void setPosition(double lng, double lat, double alt) {
-            // 播放中瞬移是自相矛盾的状态：两个写入者抢同一个位置。先结束路线，
-            // 让「谁在控制位置」始终只有一个答案。
+            // 播放中瞬移是自相矛盾的状态：两个写入者抢同一个位置。
+            // 先结束路线，并靠 advanceRoute 回写前的那次复检，把已经进入回写阶段的
+            // 那一 tick 丢弃。这把「位置归谁」的窗口从一次 advance()+getPosition()
+            // 缩到相邻几条指令，但**没有消除**：彻底的单写者需要把所有写入者都并到
+            // 定位线程（摇杆那一路也要改），是另一个量级的改动，不在本次范围。
             stopRoute();
 
             mLocHandler.removeMessages(HANDLER_MSG_ID);
