@@ -80,6 +80,16 @@ public class ServiceGo extends Service {
     // 摇杆相关
     private JoyStick mJoyStick;
 
+    /**
+     * 用户希望的摇杆可见性，初值为 true（{@link #initJoyStick()} 起来就 {@code show()}）。
+     *
+     * <p>播放期间这个字段<b>不变</b>，只是被临时压住——播放结束 / 到达时按它恢复。
+     * 通知栏有「隐藏摇杆」，用户可能本来就把它关了；结束时<b>不许</b>强行弹回来。
+     * 反过来，用户在播放期间显式点了「显示摇杆」，那也是他的意愿，要记下来，
+     * 否则播放一结束又会被按旧意愿收回去。
+     */
+    private volatile boolean mJoyStickDesiredVisible = true;
+
     /** 当前路线。null 表示没有路线在跑。定位线程读、UI 线程写，故 volatile。 */
     private volatile RoutePlayer mRoutePlayer;
     private volatile String mRouteName;
@@ -319,6 +329,37 @@ public class ServiceGo extends Service {
     }
 
     /**
+     * 按「是否在播放」与「用户希望的可见性」求值后落到 {@link JoyStick} 上。
+     *
+     * <p>播放期间<b>整个悬浮窗收起来</b>：用户抱怨它挡在目标 App 上面。只把 alpha 降到
+     * 0.4 是不够的——那只是变淡，仍然占着屏幕。
+     *
+     * <p>「禁用」那一层（{@link #refreshJoyStickInputEnabled()} 与
+     * {@code JoyStick.setInputEnabled}）因此<b>保留不删</b>：通知栏的「显示摇杆」随时
+     * 能把摇杆叫出来，那时它必须呈现为变灰且拖不动，而不是不透明却拖不动。
+     * {@code JoyStick.show()} 自己会先调 {@code applyInputEnabledVisual()}，
+     * 所以中途叫出来的那一个自然是灰的，这里不必再补一次。
+     *
+     * <p>与 {@link #refreshJoyStickInputEnabled()} 同一个模式：投递出去、由任务自己
+     * 重新求值，所以即使投递被主线程的 {@code startRoute()} 插到中间，后到的那次
+     * 也会算出对新路线正确的状态。
+     */
+    private void refreshJoyStickVisibility() {
+        postToMain(() -> {
+            if (mJoyStick == null) {
+                return;
+            }
+            if (isRoutePlaying()) {
+                mJoyStick.hide();
+            } else if (mJoyStickDesiredVisible) {
+                mJoyStick.show();
+            } else {
+                mJoyStick.hide();
+            }
+        });
+    }
+
+    /**
      * 到达终点：位置停在末点、速度与航向归零，摇杆交还用户，通知改文案。
      *
      * <p>运行在定位线程上，三件事全部走 {@link #postToMain}；而且它们都在**执行时**
@@ -335,6 +376,7 @@ public class ServiceGo extends Service {
         mCurBea = DEFAULT_BEA;
         syncJoyStickToCurrentPosition();
         refreshJoyStickInputEnabled();
+        refreshJoyStickVisibility();
         updateNotification();
     }
 
@@ -558,10 +600,15 @@ public class ServiceGo extends Service {
             String action = intent.getAction();
             if (action != null) {
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW)) {
+                    // 播放期间也照样显示：这是用户的显式要求（他要看摇杆内置地图上的当前位置），
+                    // 只是那时摇杆是灰的、拖不动。同时把意愿记下来，否则播放一结束，
+                    // 恢复逻辑会按旧意愿把它收回去，用户刚叫出来的摇杆又没了。
+                    mJoyStickDesiredVisible = true;
                     mJoyStick.show();
                 }
 
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE)) {
+                    mJoyStickDesiredVisible = false;
                     mJoyStick.hide();
                 }
 
@@ -589,6 +636,18 @@ public class ServiceGo extends Service {
             mCurAlt = alt;
             mLocHandler.sendEmptyMessage(HANDLER_MSG_ID);
             mJoyStick.setCurrentPosition(mCurLng, mCurLat, mCurAlt);
+        }
+
+        /**
+         * 当前被模拟的位置，{@code {经度, 纬度}}，<b>WGS84</b>。
+         *
+         * <p>模拟界面的地图要标出「现在人在哪」，而进度快照
+         * （{@link RouteProgress}）里只有里程、没有位置，所以单开这一个只读口子。
+         * 三个字段都是 volatile，读到的是一次自洽的快照；不做任何换算——调用方要画到
+         * 百度地图上，自己走 {@code MapUtils.wgs2bd09}。
+         */
+        public double[] getCurrentPosition() {
+            return new double[]{mCurLng, mCurLat};
         }
 
         /**
@@ -631,8 +690,10 @@ public class ServiceGo extends Service {
             mRoutePlayer = player;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
             mLastTickMs = SystemClock.elapsedRealtime();
-            // 表现层：摇杆禁用并变灰、内置地图跳到路线起点、通知换成「正在模拟路线」
+            // 表现层：整个悬浮窗收起（用户抱怨它挡在目标 App 上）、摇杆禁用并变灰、
+            // 内置地图跳到路线起点、通知换成「正在模拟路线」
             refreshJoyStickInputEnabled();
+            refreshJoyStickVisibility();
             syncJoyStickToCurrentPosition();
             updateNotification();
             return true;
@@ -654,9 +715,10 @@ public class ServiceGo extends Service {
             // 即便有值也是噪声，0 是最不容易被读成异常的那个取值。
             mSpeed = 0d;
             mCurBea = DEFAULT_BEA;
-            // 表现层：摇杆交还用户、通知退回「服务正在运行中」。
-            // 放在置 null 之后——两者都在执行时重读 mRoutePlayer
+            // 表现层：摇杆按用户意愿回到屏幕上（播放前关掉的就保持关着）、通知退回
+            // 「服务正在运行中」。放在置 null 之后——两者都在执行时重读 mRoutePlayer
             refreshJoyStickInputEnabled();
+            refreshJoyStickVisibility();
             updateNotification();
             syncJoyStickToCurrentPosition();
         }
