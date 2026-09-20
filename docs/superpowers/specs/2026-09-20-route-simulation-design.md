@@ -1,7 +1,8 @@
 # 行屿 路线模拟 — 设计
 
 - 日期：2026-09-20
-- 状态：设计已确认，待实现
+- 状态：**已实现**。当前行为的权威描述在 `CLAUDE.md` 的「路线模拟」一节；本文是设计记录，
+  实现期间与原设计的偏离（以及那些偏离的理由）记在那里，不在这份文档里追平
 - 相关：
   - `docs/superpowers/specs/2026-09-19-route-draw-design.md`（绘制路线，产出 `RouteConfig` 表）
   - `docs/superpowers/specs/2026-09-19-nfc-card-design.md`（NFC 位置卡，`RouteSimulationActivity` 的现有入口）
@@ -171,7 +172,7 @@ public RouteProgress getRouteProgress()   // 未播放时返回 null
 
 `setPosition(double lng, double lat, double alt)`（主界面瞬移）在改单元格之前先 `stopRoute()`。
 
-理由：播放中瞬移是自相矛盾的状态——两个写入者抢同一个单元格，位置来源不明。终止播放让「谁在控制位置」始终只有一个答案。
+理由：播放中瞬移是自相矛盾的状态——两个写入者抢同一个单元格，位置来源不明。终止播放把「谁在控制位置」这个窗口**收窄**到相邻几条指令（已经进入回写阶段的那个 tick 会被回写前的一次复检丢弃），但**没有消除**：彻底的单写者需要把所有写入者——含摇杆那一路——都并到定位线程，本分支没有做。代码注释与 `CLAUDE.md` 的「路线模拟」一节都是这个如实版本。
 
 ### 服务存活标志
 
@@ -180,7 +181,7 @@ private static volatile boolean sAlive = false;   // onCreate 置 true，onDestr
 public  static boolean isAlive()
 ```
 
-供 `MainActivity` 对账（见下）。静态状态跨 Activity 协调在本项目有先例（`MainActivity.mMarkLatLngMap` 是静态的，`showLocation()` 是静态方法）。
+实际用途只有一个：让 `RouteSimulationActivity` 在 `onResume` 里判断该不该绑定，免得 `BIND_AUTO_CREATE` 把一个已经死掉的服务凭空**创建**出来（`MainActivity` 零处引用它）。「供 `MainActivity` 对账 `isMockServStart`」是**未实现的设想**——那个字段是已知陈旧字段，对账没有做，理由与后果见 `CLAUDE.md` 的「已知缺陷」一节。静态状态跨 Activity 协调在本项目有先例（`MainActivity.mMarkLatLngMap` 是静态的，`showLocation()` 是静态方法）。
 
 ### 通知
 
