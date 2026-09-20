@@ -118,6 +118,15 @@ public class RouteSimulationActivity extends BaseActivity {
     private double mSelectedSpeed = 1.2d;
     /** 面板是否已收起。收起后只剩把手那一行，状态文本仍可见。 */
     private boolean mPanelCollapsed;
+    /**
+     * 这次 {@code onResume} 之前是不是刚被重建过（旋转）。
+     *
+     * <p>只有 {@link #onRestoreInstanceState} 会置它——那个回调**只在重建时**跑，
+     * 所以它正好等价于「这次是旋转，不是从后台回来」。用来决定 {@code onResume} 里
+     * 要不要重新框相机：重建后必须框（地图回默认位置了），从后台回来绝不能框
+     * （会把用户自己拖过的地图拽回去）。
+     */
+    private boolean mNeedsReframe;
     /** applySpeedSelection() 里的 check() 会回调监听器，用它挡住自触发。 */
     private boolean mApplyingSpeed;
 
@@ -223,6 +232,10 @@ public class RouteSimulationActivity extends BaseActivity {
         if (index >= 0 && index < mRows.size()) {
             mSelectedIndex = index;
             onSelectionChanged();
+            // 地图部分刻意留到 onResume 再补一次：重建时 MapView 刚建出来，此刻画上去的
+            // 覆盖物会被地图自己的初始化冲掉，相机也要等地图就绪才框得住。
+            // 这个回调只在重建时跑，所以它置的标记正好等价于「这次是旋转」。
+            mNeedsReframe = true;
         }
 
         applyPanelCollapsed(savedInstanceState.getBoolean(STATE_PANEL_COLLAPSED, false));
@@ -232,6 +245,10 @@ public class RouteSimulationActivity extends BaseActivity {
     protected void onResume() {
         super.onResume();
         mMapView.onResume();
+
+        // 旋转重建后折线随旧 MapView 一起没了、相机也回了默认位置，这里补齐；
+        // 从后台回来则是幂等的空操作，且绝不碰相机。见 syncMapOnResume() 的注释。
+        syncMapOnResume();
 
         // 只在服务已经活着时才绑定：bindService 配 BIND_AUTO_CREATE 会**创建**服务，
         // 而 ServiceGo.onCreate 会装 test provider 并起前台通知——光打开这个界面就把
@@ -433,48 +450,118 @@ public class RouteSimulationActivity extends BaseActivity {
     }
 
     /**
-     * 按当前选中重画地图上的折线，并把相机框到那条路线。
+     * 当前选中那条路线用于地图显示的点集，{@code null} 表示没有可画的。
      *
      * <p>用的是 {@link RouteConfig#getPoints()} 那份 <b>BD09</b> 点——百度地图原生坐标系，
      * 不做任何换算（喂给服务的 WGS84 那一份在 {@link RouteRow#wgsPoints} 里，别混）。
+     *
+     * <p>闭合路线要把首点再补到末尾，才画得出那段回程。列表里显示的总长是含回程的
+     * （{@code RoutePlayer} 对闭合路线把首尾当成一段），两者必须一致。
      */
-    private void updateMapForSelection() {
+    private List<LatLng> selectedDisplayPoints() {
+        if (mSelectedIndex < 0 || mSelectedIndex >= mRows.size()) {
+            return null;
+        }
+        RouteConfig config = mRows.get(mSelectedIndex).config;
+        List<LatLng> points = config.getPoints();
+        if (points.size() < 2) {
+            // 一个点连不成线
+            return null;
+        }
+        if (!config.isClosed()) {
+            return points;
+        }
+        List<LatLng> loop = new ArrayList<>(points);
+        loop.add(points.get(0));
+        return loop;
+    }
+
+    /** 摘掉折线覆盖物（如果有），并把本地引用一并清掉。 */
+    private void clearRouteLine() {
+        if (mRouteLine != null) {
+            mRouteLine.remove();
+            mRouteLine = null;
+        }
+    }
+
+    /**
+     * 把当前选中的路线画到地图上。<b>幂等</b>：已经画着同一条就原样留着，不重复
+     * {@code addOverlay}——重复堆叠会让地图上的覆盖物越攒越多。没有选中、或点不足 2 个，
+     * 就什么都不做（也不动相机）。
+     *
+     * <p>单独抽出来是为了能在 {@code onResume} 里安全地重放一次：旋转会重建 Activity 与
+     * MapView，折线随旧 MapView 一起没了，需要在新的地图上重画。
+     */
+    private void renderSelectedRoute() {
         if (mBaiduMap == null) {
             return;
         }
+        // isRemoved() 是给「地图内部已经把覆盖物丢掉了、而本地引用还在」留的一手：
+        // 只判非 null 会把这种情况误判成「已经画好了」，那条线就再也不会回来。
+        if (mRouteLine != null && !mRouteLine.isRemoved()) {
+            return;
+        }
+        mRouteLine = null;
+
+        List<LatLng> points = selectedDisplayPoints();
+        if (points == null) {
+            return;
+        }
         try {
-            if (mRouteLine != null) {
-                mRouteLine.remove();
-                mRouteLine = null;
-            }
-            if (mSelectedIndex < 0 || mSelectedIndex >= mRows.size()) {
-                return;
-            }
-
-            RouteConfig config = mRows.get(mSelectedIndex).config;
-            List<LatLng> points = config.getPoints();
-            if (points.size() < 2) {
-                // 一个点连不成线。不画，但也不动相机。
-                return;
-            }
-
-            if (config.isClosed()) {
-                // 闭合路线要把首点再补到末尾才画得出那段回程。列表里显示的总长是含回程的
-                // （RoutePlayer 对闭合路线把首尾当成一段），两者必须一致。
-                List<LatLng> loop = new ArrayList<>(points);
-                loop.add(points.get(0));
-                points = loop;
-            }
-
             mRouteLine = (Polyline) mBaiduMap.addOverlay(new PolylineOptions()
                     .points(points)
                     .color(getResources().getColor(R.color.colorPrimary, getTheme()))
                     .width((int) (ROUTE_LINE_WIDTH_DP * getResources().getDisplayMetrics().density)));
-
-            fitCameraTo(points);
         } catch (Exception e) {
-            XLog.e("ROUTE_SIM: ERROR - updateMapForSelection");
+            XLog.e("ROUTE_SIM: ERROR - renderSelectedRoute");
         }
+    }
+
+    /** 把相机框到当前选中的路线。没有可画的就什么都不做。 */
+    private void frameSelectedRoute() {
+        List<LatLng> points = selectedDisplayPoints();
+        if (points != null) {
+            fitCameraTo(points);
+        }
+    }
+
+    /**
+     * 选中行变了：摘掉旧线、重画新的，并把相机框到新的那条。
+     *
+     * <p>与 {@link #renderSelectedRoute()} 分工不同——那个是幂等的「保证画着」，
+     * 这个是「换了一条，先清后画」。
+     */
+    private void updateMapForSelection() {
+        clearRouteLine();
+        renderSelectedRoute();
+        frameSelectedRoute();
+    }
+
+    /**
+     * 回到前台时把地图与选中态对齐。
+     *
+     * <p>必须分两种情况，差别只在**相机**：
+     * <ul>
+     *   <li><b>旋转</b>会重建 Activity 与 MapView——折线随旧 MapView 一起没了、相机也回到
+     *       默认位置，所以要重画并重新框一次；
+     *   <li><b>从后台回来</b>时 MapView 没有重建，重画是幂等的空操作，而相机<b>绝不能</b>
+     *       重新框——那会把用户自己拖动 / 缩放过地图硬拽回去。
+     * </ul>
+     *
+     * <p>区分依据是 {@link #onRestoreInstanceState} 只在重建时跑，它置的
+     * {@link #mNeedsReframe}。没有这个标记就没法区分：{@code onResume} 两种情况下都会跑。
+     */
+    private void syncMapOnResume() {
+        if (mNeedsReframe) {
+            mNeedsReframe = false;
+            // 先丢掉本地引用再画。重建后这里其实是新实例（引用必为 null），
+            // 但万一地图内部丢过覆盖物而引用还在，这一步能让上面的幂等判断不至于误判。
+            clearRouteLine();
+            renderSelectedRoute();
+            frameSelectedRoute();
+            return;
+        }
+        renderSelectedRoute();
     }
 
     /**
