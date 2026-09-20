@@ -42,11 +42,14 @@ public class ServiceGo extends Service {
     public static final double DEFAULT_LNG = 117.027707;
     public static final double DEFAULT_ALT = 55.0D;
     public static final float DEFAULT_BEA = 0.0F;
-    private double mCurLat = DEFAULT_LAT;
-    private double mCurLng = DEFAULT_LNG;
-    private double mCurAlt = DEFAULT_ALT;
-    private float mCurBea = DEFAULT_BEA;
-    private double mSpeed = 1.2;        /* 默认的速度，单位 m/s */
+    // 位置单元格：定位线程每 100ms 读它推给 mock provider，主线程（摇杆 listener、
+    // setPosition、onStartCommand）与定位线程（advanceRoute）都会写。
+    // 路线模拟让定位线程成为第一个非主线程写者，故 volatile——与 mLastTickMs 同理。
+    private volatile double mCurLat = DEFAULT_LAT;
+    private volatile double mCurLng = DEFAULT_LNG;
+    private volatile double mCurAlt = DEFAULT_ALT;
+    private volatile float mCurBea = DEFAULT_BEA;
+    private volatile double mSpeed = 1.2;        /* 默认的速度，单位 m/s */
     private static final int HANDLER_MSG_ID = 0;
     private static final String SERVICE_GO_HANDLER_NAME = "ServiceGoLocation";
 
@@ -64,6 +67,7 @@ public class ServiceGo extends Service {
     private static final int SERVICE_GO_NOTE_ID = 1;
     private static final String SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW = "ShowJoyStick";
     private static final String SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE = "HideJoyStick";
+    private static final String SERVICE_GO_NOTE_ACTION_ROUTE_STOP = "StopRoute";
     private static final String SERVICE_GO_NOTE_CHANNEL_ID = "SERVICE_GO_NOTE";
     private static final String SERVICE_GO_NOTE_CHANNEL_NAME = "SERVICE_GO_NOTE";
     private NoteActionReceiver mActReceiver;
@@ -143,6 +147,7 @@ public class ServiceGo extends Service {
         IntentFilter filter = new IntentFilter();
         filter.addAction(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW);
         filter.addAction(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE);
+        filter.addAction(SERVICE_GO_NOTE_ACTION_ROUTE_STOP);
         registerReceiver(mActReceiver, filter);
 
         NotificationChannel mChannel = new NotificationChannel(SERVICE_GO_NOTE_CHANNEL_ID, SERVICE_GO_NOTE_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT);
@@ -152,6 +157,19 @@ public class ServiceGo extends Service {
             notificationManager.createNotificationChannel(mChannel);
         }
 
+        startForeground(SERVICE_GO_NOTE_ID, buildNotification());
+    }
+
+    /**
+     * 构造前台通知。
+     *
+     * <p>播放路线时正文换成模拟状态，并多一个「结束路线」动作——用户整场模拟都在别的
+     * App 里，没有这个动作就只能切回行屿才能停。
+     *
+     * <p>措辞刻意不叫「停止模拟」：那会被读成停掉整个 mock 服务。结束路线之后服务继续
+     * 在终点维持位置模拟，这是对的——用户此刻正「站」在终点。
+     */
+    private Notification buildNotification() {
         //准备intent
         Intent clickIntent = new Intent(this, MainActivity.class);
         PendingIntent clickPI = PendingIntent.getActivity(this, 1, clickIntent, PendingIntent.FLAG_IMMUTABLE);
@@ -160,17 +178,55 @@ public class ServiceGo extends Service {
         Intent hideIntent = new Intent(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE);
         PendingIntent hidePendingPI = PendingIntent.getBroadcast(this, 0, hideIntent, PendingIntent.FLAG_IMMUTABLE);
 
-        Notification notification = new NotificationCompat.Builder(this, SERVICE_GO_NOTE_CHANNEL_ID)
+        // mRoutePlayer 是 volatile，读一次进局部：正文文案与动作列表取自同一个快照，
+        // 否则「正在模拟路线」配上一个没有停止动作的通知（或反过来）都可能出现
+        RoutePlayer player = mRoutePlayer;
+        String text;
+        if (player == null) {
+            text = getResources().getString(R.string.app_service_tips);
+        } else {
+            text = getResources().getString(player.isFinished()
+                    ? R.string.app_route_arrived
+                    : R.string.app_route_playing);
+        }
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, SERVICE_GO_NOTE_CHANNEL_ID)
                 .setChannelId(SERVICE_GO_NOTE_CHANNEL_ID)
                 .setContentTitle(getResources().getString(R.string.app_name))
-                .setContentText(getResources().getString(R.string.app_service_tips))
+                .setContentText(text)
                 .setContentIntent(clickPI)
                 .addAction(new NotificationCompat.Action(null, getResources().getString(R.string.note_show), showPendingPI))
                 .addAction(new NotificationCompat.Action(null, getResources().getString(R.string.note_hide), hidePendingPI))
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .build();
+                .setSmallIcon(R.mipmap.ic_launcher);
 
-        startForeground(SERVICE_GO_NOTE_ID, notification);
+        if (player != null) {
+            Intent stopIntent = new Intent(SERVICE_GO_NOTE_ACTION_ROUTE_STOP);
+            // 请求码与上面两个错开；即便 action 已经不同，也别复用同一个码
+            PendingIntent stopPendingPI = PendingIntent.getBroadcast(this, 3, stopIntent, PendingIntent.FLAG_IMMUTABLE);
+            builder.addAction(new NotificationCompat.Action(null,
+                    getResources().getString(R.string.note_route_stop), stopPendingPI));
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * 刷新前台通知。播放状态一变就调。{@code notify} 线程安全，定位线程可直接调。
+     *
+     * <p>整体护住：本方法的调用点里，`stopRoute()` 那一路在主线程上、由点击派发器
+     * （`doGoLocation` → `setPosition`）可达，异常逃出去是未捕获崩溃。按项目约定
+     * 记日志后降级为「通知没刷新」。构造本身在 {@code onCreate} 里没护（通知坏掉会
+     * 在启动时当场暴露），所以这里吞掉不会掩盖通知格式本身的缺陷。
+     */
+    private void updateNotification() {
+        try {
+            NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.notify(SERVICE_GO_NOTE_ID, buildNotification());
+            }
+        } catch (Exception e) {
+            XLog.e("SERVICEGO: ERROR - updateNotification");
+        }
     }
 
     private void initJoyStick() {
@@ -178,6 +234,11 @@ public class ServiceGo extends Service {
         mJoyStick.setListener(new JoyStick.JoyStickClickListener() {
             @Override
             public void onMoveInfo(double speed, double disLng, double disLat, double angle) {
+                // 播放期间位置归路线，摇杆输入一律忽略。权威层：JoyStick 自己也拦，
+                // 但那只是让「禁用」在观感上成立，入口分散，靠界面层拦不干净。
+                if (isRoutePlaying()) {
+                    return;
+                }
                 mSpeed = speed;
                 // 根据当前的经纬度和距离，计算下一个经纬度
                 // Latitude: 1 deg = 110.574 km // 纬度的每度的距离大约为 110.574km
@@ -190,12 +251,49 @@ public class ServiceGo extends Service {
 
             @Override
             public void onPositionInfo(double lng, double lat, double alt) {
+                if (isRoutePlaying()) {
+                    return;
+                }
                 mCurLng = lng;
                 mCurLat = lat;
                 mCurAlt = alt;
             }
         });
         mJoyStick.show();
+    }
+
+    /**
+     * 路线是否正在走。到达终点后为 false——那时位置不再被引擎推进，
+     * 用户「站」在终点，摇杆要能继续用（设计文档：播放结束（用户结束 / 到达终点）
+     * 时摇杆恢复可用）。所以判据是「在走」而不是「非 null」：仅凭
+     * {@code mRoutePlayer != null} 会在「已到达、等待用户结束」这个合法状态下
+     * 把摇杆变成一个看得见、拖不动的死控件。
+     */
+    private boolean isRoutePlaying() {
+        RoutePlayer player = mRoutePlayer;
+        return player != null && !player.isFinished();
+    }
+
+    /** 开关摇杆输入。{@code JoyStick} 是 View，只能在主线程碰。 */
+    private void setJoyStickInputEnabled(boolean enabled) {
+        final boolean value = enabled;
+        postToMain(() -> {
+            if (mJoyStick != null) {
+                mJoyStick.setInputEnabled(value);
+            }
+        });
+    }
+
+    /**
+     * 到达终点：位置停在末点，摇杆交还用户，通知改文案。
+     *
+     * <p>运行在定位线程上：摇杆那两下走 {@link #postToMain}。通知的
+     * {@code NotificationManager.notify} 本身线程安全，直接调。
+     */
+    private void onRouteFinished() {
+        syncJoyStickToCurrentPosition();
+        setJoyStickInputEnabled(true);
+        updateNotification();
     }
 
     private void initGoLocation() {
@@ -271,6 +369,13 @@ public class ServiceGo extends Service {
             mCurLat = position[1];
             mCurBea = (float) player.getBearing();
             mSpeed = player.getSpeed();
+
+            // 到达检测放在路由体末尾（回写之后）：方法开头的 isFinished() 早退保证
+            // 已完成的路线不会再走到这里，所以本行恰好触发一次，不需要「是否已触发」标志。
+            // 这里用的是 mRoutePlayer != player 复检之后的那个 player，语义自洽。
+            if (player.isFinished()) {
+                onRouteFinished();
+            }
         } catch (Exception e) {
             // handleMessage 的 try 只接 InterruptedException：异常若逃出去会杀死
             // 定位线程的 Looper——isStop 仍是 false、前台通知还挂着、被 mock 的位置
@@ -417,6 +522,12 @@ public class ServiceGo extends Service {
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE)) {
                     mJoyStick.hide();
                 }
+
+                // 走 binder 而不是直接改字段：stopRoute 里那一套（复检配合的置 null、
+                // 摇杆交还、通知回收）必须整段跑，不能在这里抄一遍
+                if (action.equals(SERVICE_GO_NOTE_ACTION_ROUTE_STOP)) {
+                    mBinder.stopRoute();
+                }
             }
         }
     }
@@ -469,6 +580,10 @@ public class ServiceGo extends Service {
             mRouteName = routeName == null ? "" : routeName;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
             mLastTickMs = SystemClock.elapsedRealtime();
+            // 表现层：摇杆禁用并变灰、内置地图跳到路线起点、通知换成「正在模拟路线」
+            setJoyStickInputEnabled(false);
+            syncJoyStickToCurrentPosition();
+            updateNotification();
             return true;
         }
 
@@ -479,6 +594,10 @@ public class ServiceGo extends Service {
             }
             mRoutePlayer = null;
             mRouteName = null;
+            // 表现层：摇杆交还用户、通知退回「服务正在运行中」。
+            // 放在置 null 之后——通知正文按 mRoutePlayer 是否为 null 决定
+            setJoyStickInputEnabled(true);
+            updateNotification();
             syncJoyStickToCurrentPosition();
         }
 

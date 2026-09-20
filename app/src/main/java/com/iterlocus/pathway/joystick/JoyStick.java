@@ -34,6 +34,7 @@ import com.baidu.mapapi.map.MyLocationData;
 import com.baidu.mapapi.model.LatLng;
 import com.baidu.mapapi.search.sug.SuggestionSearch;
 import com.baidu.mapapi.search.sug.SuggestionSearchOption;
+import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.database.DataBaseHistoryLocation;
 import com.iterlocus.pathway.HistoryActivity;
 import com.iterlocus.pathway.MainActivity;
@@ -66,6 +67,8 @@ public class JoyStick extends View {
     private boolean isBike;
     private ImageButton btnBike;
     private JoyStickClickListener mListener;
+    /** 输入开关。播放路线期间置 false：位置归路线，摇杆不该再能改它。 */
+    private boolean mInputEnabled = true;
 
     // 移动
     private View mJoystickLayout;
@@ -151,14 +154,23 @@ public class JoyStick extends View {
     }
 
     public void setCurrentPosition(double lng, double lat, double alt) {
-        double[] lngLat = MapUtils.wgs2bd09(lng, lat);
-        mCurMapLngLat = new LatLng(lngLat[1], lngLat[0]);
-        mAltitude = alt;
+        try {
+            double[] lngLat = MapUtils.wgs2bd09(lng, lat);
+            mCurMapLngLat = new LatLng(lngLat[1], lngLat[0]);
+            mAltitude = alt;
 
-        resetBaiduMap();
+            resetBaiduMap();
+        } catch (Exception e) {
+            // 本方法在主线程上被调（ServiceGo 的 setPosition / stopRoute / onStartCommand），
+            // 抛出会一路逃到点击派发器成为未捕获崩溃。地图 SDK 的异常不是调用方能修的，
+            // 按项目约定记日志后降级：地图这一次没刷新，位置单元格本身已经写好。
+            XLog.e("JOYSTICK: ERROR - setCurrentPosition");
+        }
     }
 
     public void show() {
+        // 切窗口后灰态仍在：三个子窗口是各自 inflate 出来的，切过去的是另一个 View
+        applyInputEnabledVisual();
         switch (mCurWin) {
             case WINDOW_TYPE_MAP:
                 if (mJoystickLayout.getParent() != null) {
@@ -230,6 +242,45 @@ public class JoyStick extends View {
 
     public void setListener(JoyStickClickListener mListener) {
         this.mListener = mListener;
+    }
+
+    /**
+     * 开关摇杆输入。
+     *
+     * <p>刻意不叫 {@code setEnabled}：{@code JoyStick extends View}，而
+     * {@code View.setEnabled(boolean)} 已存在且语义不同（它还牵动框架的 clickable
+     * 与 drawable 状态刷新）。覆写框架方法会让人以为调的是 View 那一个。
+     *
+     * <p>禁用时必须<b>同时变灰</b>：外观不变的禁用态在本项目已经栽过一次
+     * （终审 Ruling UI-4，一个 setEnabled(false) 却看不出变化的按钮），
+     * 用户看到能拖却没反应，比明确灰掉更糟。
+     */
+    public void setInputEnabled(boolean enabled) {
+        mInputEnabled = enabled;
+        if (!enabled) {
+            if (mTimer != null) {
+                mTimer.cancel();
+            }
+            isMove = false;
+        }
+        applyInputEnabledVisual();
+    }
+
+    public boolean isInputEnabled() {
+        return mInputEnabled;
+    }
+
+    private void applyInputEnabledVisual() {
+        float alpha = mInputEnabled ? 1f : 0.4f;
+        if (mJoystickLayout != null) {
+            mJoystickLayout.setAlpha(alpha);
+        }
+        if (mMapLayout != null) {
+            mMapLayout.setAlpha(alpha);
+        }
+        if (mHistoryLayout != null) {
+            mHistoryLayout.setAlpha(alpha);
+        }
     }
 
     private void initWindowManager() {
@@ -370,6 +421,10 @@ public class JoyStick extends View {
     }
 
     private void processDirection(boolean auto, double angle, double r) {
+        // 方向输入的唯一收口：RockerView 与 ButtonView 都指向这里
+        if (!mInputEnabled) {
+            return;
+        }
         if (r <= 0) {
             mTimer.cancel();
             isMove = false;
@@ -398,6 +453,10 @@ public class JoyStick extends View {
 
         @Override
         public boolean onTouch(View view, MotionEvent event) {
+            // 禁用时吃掉事件：窗口不再能被拖走（三个子窗口共用本监听器）
+            if (!mInputEnabled) {
+                return true;
+            }
             switch (event.getAction()) {
                 case MotionEvent.ACTION_DOWN:
                     x = (int) event.getRawX();
@@ -544,6 +603,9 @@ public class JoyStick extends View {
                     mMarkMapLngLat = null;
 
                     double[] lngLat = MapUtils.bd2wgs(mCurMapLngLat.longitude, mCurMapLngLat.latitude);
+                    if (!mInputEnabled) {
+                        return;
+                    }
                     mListener.onPositionInfo(lngLat[0], lngLat[1], mAltitude);
 
                     resetBaiduMap();
@@ -729,7 +791,11 @@ public class JoyStick extends View {
             String wgs84Longitude = wgs84latLngStr[0].substring(wgs84latLngStr[0].indexOf(':') + 1);
             String wgs84Latitude = wgs84latLngStr[1].substring(wgs84latLngStr[1].indexOf(':') + 1);
 
-            mListener.onPositionInfo(Double.parseDouble(wgs84Longitude), Double.parseDouble(wgs84Latitude), mAltitude);
+            // 这里刻意不能用 return：下面还有读 BDLatLngText、重设 mCurMapLngLat 刷地图的语句，
+            // 提前返回会让禁用期间的历史窗地图停在旧位置
+            if (mInputEnabled) {
+                mListener.onPositionInfo(Double.parseDouble(wgs84Longitude), Double.parseDouble(wgs84Latitude), mAltitude);
+            }
 
             // 注意这里在选择位置之后需要刷新地图
             String bdLatLng = (String) ((TextView) view.findViewById(R.id.BDLatLngText)).getText();
