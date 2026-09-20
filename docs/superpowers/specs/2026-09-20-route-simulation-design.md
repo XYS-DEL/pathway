@@ -268,13 +268,16 @@ resetBaiduMap() → mBaiduMap.clear() + setMyLocationData() + animateMapStatus()
 
 `MainActivity.isMockServStart` 是 Activity 自己的字段，在 `startGoLocation()` / `stopGoLocation()` 里维护。模拟界面独立启动服务后，这个字段是错的——回到主界面，FAB 显示「未启动」，但服务实际在跑并在移动。
 
-**修法**：`MainActivity.onResume()` 里用 `ServiceGo.isAlive()` 对账：
+**修法（已废弃，见下方警示，不要照做）**：`MainActivity.onResume()` 里用 `ServiceGo.isAlive()` 对账：
 
 ```java
 isMockServStart = ServiceGo.isAlive();
 ```
 
+> **警示：上面这行不能实现。** 逐行复核代码后确认：`isMockServStart` 同时是「显示标志」和「MainActivity 已经绑定过服务」的代理（它守着 `stopGoLocation()` 与 `onDestroy()` 两处 `unbindService`），而 `mServiceBinder` 只在 MainActivity 自己的连接回调里赋值。直接按 `isAlive()` 赋值会出现「字段为 true 但从未绑定」的状态：解绑一个未注册的连接抛 `IllegalArgumentException`，紧随其后的 FAB 分支再解引用空 binder 崩溃。正解是把「是否绑定」与「服务是否存活」拆成两本账、FAB 状态从服务反推——**本分支没有做**，见 `CLAUDE.md` 的「已知缺陷」一节。此段保留是为了说明当初为什么这么想。
+
 顺带修掉一个既有的潜伏问题：服务被系统杀死后，这个字段本来就是陈旧的。
+（这个「潜伏问题」是真的，但上面的修法会引入更严重的问题，所以至今**未修**。）
 
 ## 界面
 

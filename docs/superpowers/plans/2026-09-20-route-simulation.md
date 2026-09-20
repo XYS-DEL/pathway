@@ -2118,6 +2118,8 @@ public class RouteSimulationActivity extends BaseActivity {
         isMockServStart = ServiceGo.isAlive();
 ```
 
+> **警示：这一段已废弃，不要照做。** `isMockServStart` 同时守着 `stopGoLocation()` 与 `onDestroy()` 里的两处 `unbindService`（它是「MainActivity 绑定过服务」的代理），而 `mServiceBinder` 只在 MainActivity 自己的连接回调里赋值。按 `isAlive()` 直接赋值会造成「字段为 true 但没绑定」：解绑未注册的连接抛 `IllegalArgumentException`，FAB 分支再解引用空 binder 崩溃。正解是拆开「是否绑定」与「服务是否存活」，**本分支未做**，见 `CLAUDE.md` 的「已知缺陷」一节。
+
 若 `MainActivity` 尚未 import `ServiceGo`，补上 `import com.iterlocus.pathway.service.ServiceGo;`。
 
 - [ ] **Step 8: 验证三件套**
