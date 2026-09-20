@@ -319,13 +319,20 @@ public class ServiceGo extends Service {
     }
 
     /**
-     * 到达终点：位置停在末点，摇杆交还用户，通知改文案。
+     * 到达终点：位置停在末点、速度与航向归零，摇杆交还用户，通知改文案。
      *
      * <p>运行在定位线程上，三件事全部走 {@link #postToMain}；而且它们都在**执行时**
      * 重读 {@code mRoutePlayer}，所以即使这三次投递被主线程上的一次
      * {@code startRoute()} 插到中间，后到的那次也会算出对新路线正确的状态。
      */
     private void onRouteFinished() {
+        // 复位放在最前、也就是交还摇杆之前。到达是**终止态**：路线不再推进，位置就静止了，
+        // 而 mSpeed / mCurBea 会继续被 setLocationGPS/Network 上报——静止位置配着最后一段的
+        // 10 m/s 与旧航向，正是目标 App 可以据以识别的破绽；且它比 stopRoute() 那条挂得更久
+        // （要一直挂到用户手动结束）。放在 refreshJoyStickInputEnabled() 之前，是为了让复位
+        // 先于「用户可以拖摇杆」发生：投递带 happens-before，摇杆随后写的值不会被这里盖掉。
+        mSpeed = 0d;
+        mCurBea = DEFAULT_BEA;
         syncJoyStickToCurrentPosition();
         refreshJoyStickInputEnabled();
         updateNotification();
