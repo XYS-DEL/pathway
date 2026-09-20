@@ -343,18 +343,32 @@ public class ServiceGo extends Service {
      * <p>与 {@link #refreshJoyStickInputEnabled()} 同一个模式：投递出去、由任务自己
      * 重新求值，所以即使投递被主线程的 {@code startRoute()} 插到中间，后到的那次
      * 也会算出对新路线正确的状态。
+     *
+     * <p>{@code isStop} 守卫：{@code onDestroy} 打断不了一个已经投递出去的任务，而那时
+     * {@code mJoyStick.destroy()} 已经摘掉窗口、{@code mMapView} 也 {@code onDestroy} 了。
+     * 少了这道守卫，这里会把窗口重新 {@code addView} 回来（一个杀不掉的悬浮窗），
+     * 或者在 {@code WINDOW_TYPE_MAP} 模式下碰已经销毁的 MapView 而抛出。这个守卫在这里
+     * 是**可靠**的：本任务跑在主线程上，而 {@code isStop} 正是主线程写的。
+     * 整体也护住——{@code show()} 没有自己的 try/catch，异常逃出去是未捕获崩溃。
+     *
+     * <p>另外两个碰 {@code mJoyStick} 的投递不需要这道守卫：{@code setCurrentPosition}
+     * 自带 try/catch（记日志后降级），{@code setInputEnabled} 只改 alpha。
      */
     private void refreshJoyStickVisibility() {
         postToMain(() -> {
-            if (mJoyStick == null) {
-                return;
-            }
-            if (isRoutePlaying()) {
-                mJoyStick.hide();
-            } else if (mJoyStickDesiredVisible) {
-                mJoyStick.show();
-            } else {
-                mJoyStick.hide();
+            try {
+                if (isStop || mJoyStick == null) {
+                    return;
+                }
+                if (isRoutePlaying()) {
+                    mJoyStick.hide();
+                } else if (mJoyStickDesiredVisible) {
+                    mJoyStick.show();
+                } else {
+                    mJoyStick.hide();
+                }
+            } catch (Exception e) {
+                XLog.e("SERVICEGO: ERROR - refreshJoyStickVisibility");
             }
         });
     }

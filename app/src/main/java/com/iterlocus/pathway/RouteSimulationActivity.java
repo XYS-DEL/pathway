@@ -850,9 +850,13 @@ public class RouteSimulationActivity extends BaseActivity {
             LatLng position = new LatLng(bd09[1], bd09[0]);
 
             if (mPositionMarker == null) {
+                // 图标必须用**位图**资源：BitmapDescriptorFactory.fromResource 底下是
+                // BitmapFactory，它不认识 VectorDrawable（全仓唯一的先例 icon_gcoding
+                // 也是 webp）。喂它一个 <vector> 只会得到一张 null 位图——标记静默不显示，
+                // 编译和 lint 都不报。ic_home_position / ic_position 都是 vector，别用。
                 mPositionMarker = (Marker) mBaiduMap.addOverlay(new MarkerOptions()
                         .position(position)
-                        .icon(BitmapDescriptorFactory.fromResource(R.drawable.ic_home_position)));
+                        .icon(BitmapDescriptorFactory.fromResource(R.drawable.icon_gcoding)));
             } else {
                 mPositionMarker.setPosition(position);
                 mPositionMarker.setVisible(true);
