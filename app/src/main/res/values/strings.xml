@@ -205,6 +205,11 @@
     <string name="route_sim_status_playing_lap">模拟中 · 第 %1$d 圈 · 本圈 %2$s / %3$s</string>
     <string name="route_sim_meters">%1$d 米</string>
     <string name="route_sim_kilometers">%1$.1f 公里</string>
+    <string name="route_sim_pick_route_named">路线：%1$s</string>
+    <string name="route_sim_panel_collapse">收起面板</string>
+    <string name="route_sim_panel_expand">展开面板</string>
+    <string name="route_sim_arrow_collapse">▾</string>
+    <string name="route_sim_arrow_expand">▴</string>
     <!-- 绘制路线 -->
     <string name="app_route_draw">绘制路线</string>
     <string name="nav_menu_route_draw">绘制路线</string>

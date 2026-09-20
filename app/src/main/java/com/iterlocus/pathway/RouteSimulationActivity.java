@@ -16,14 +16,23 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.ListView;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
 import androidx.preference.PreferenceManager;
 
+import com.baidu.mapapi.map.BaiduMap;
+import com.baidu.mapapi.map.BitmapDescriptorFactory;
+import com.baidu.mapapi.map.MapStatusUpdateFactory;
+import com.baidu.mapapi.map.MapView;
+import com.baidu.mapapi.map.Marker;
+import com.baidu.mapapi.map.MarkerOptions;
+import com.baidu.mapapi.map.Polyline;
+import com.baidu.mapapi.map.PolylineOptions;
 import com.baidu.mapapi.model.LatLng;
+import com.baidu.mapapi.model.LatLngBounds;
 import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.database.DataBaseRoute;
 import com.iterlocus.pathway.service.ServiceGo;
@@ -36,15 +45,19 @@ import java.util.List;
 /**
  * 模拟路线。
  *
- * <p>选一条已保存的路线、选速度档位、开始模拟。真正的移动在 {@link ServiceGo} 里跑——
- * 用户按下开始之后一定会切走到目标 App，任何建立在 Activity 上的定时器都会在后台被冻结。
+ * <p>上下分栏：上面是地图（画出选中那条路线、标出当前位置），下面是一块可折叠的控制面板
+ * （选路线、选速度、开始/结束）。真正的移动在 {@link ServiceGo} 里跑——用户按下开始之后
+ * 一定会切走到目标 App，任何建立在 Activity 上的定时器都会在后台被冻结。
  *
  * <p>进度靠轮询 {@link ServiceGo.ServiceGoBinder#getRouteProgress()}，不注册回调：
  * 轮询不会在 Activity 销毁时泄漏监听器，系统重建后也自然接上，服务始终是唯一事实源。
  * 重建后靠快照里的路线名把选中行、档位、按钮文案全部对回去。
  *
+ * <p><b>两份点集，各用各的</b>：{@link RouteConfig#getPoints()} 是 BD09，只用来在地图上
+ * 画线与框相机（百度地图原生就是 BD09）；{@link RouteRow#wgsPoints} 是喂给
+ * {@link ServiceGo.ServiceGoBinder#startRoute} 的 WGS84。两边都不再做任何换算。
+ *
  * <p>本界面<b>不解析 NFC 卡片</b>，只把收到的东西原样列出来供核对。
- * 那三个字段的解析是后续版本的事。
  */
 public class RouteSimulationActivity extends BaseActivity {
 
@@ -59,6 +72,13 @@ public class RouteSimulationActivity extends BaseActivity {
 
     /** 系统重建时存/取选中行。行序取自 DataBaseRoute.queryAll（按创建时间倒序），是稳定的。 */
     private static final String STATE_SELECTED_INDEX = "STATE_SELECTED_INDEX";
+    /** 折叠态也跨重建保持，否则每次旋转面板都自己弹回来。 */
+    private static final String STATE_PANEL_COLLAPSED = "STATE_PANEL_COLLAPSED";
+
+    /** 路线折线的宽度，dp。PolylineOptions.width() 要的是像素，用前乘 density。 */
+    private static final int ROUTE_LINE_WIDTH_DP = 6;
+    /** 没有选中路线时框相机的兜底缩放级别。 */
+    private static final float SINGLE_POINT_ZOOM = 18.0f;
 
     /** 列表的一行：原始配置 + 换算后的 WGS84 点集 + WGS84 总长。 */
     private static final class RouteRow {
@@ -76,16 +96,26 @@ public class RouteSimulationActivity extends BaseActivity {
     private SharedPreferences mPreferences;
     private SQLiteDatabase mRouteDb;
 
+    private MapView mMapView;
+    private BaiduMap mBaiduMap;
+    /** 选中路线的折线覆盖物；没有选中时为 null。 */
+    private Polyline mRouteLine;
+    /** 当前位置标记；第一次真的有路线在跑时才创建，之后复用。 */
+    private Marker mPositionMarker;
+
     private TextView mStatusText;
     private TextView mPrimaryButton;
-    private TextView mEmptyText;
-    private ListView mRouteList;
+    private TextView mPickButton;
+    private TextView mToggleButton;
+    private View mPanelBody;
     private RadioGroup mSpeedGroup;
 
     private final List<RouteRow> mRows = new ArrayList<>();
     private RouteListAdapter mAdapter;
     private int mSelectedIndex = -1;
     private double mSelectedSpeed = 1.2d;
+    /** 面板是否已收起。收起后只剩把手那一行，状态文本仍可见。 */
+    private boolean mPanelCollapsed;
     /** applySpeedSelection() 里的 check() 会回调监听器，用它挡住自触发。 */
     private boolean mApplyingSpeed;
 
@@ -140,17 +170,23 @@ public class RouteSimulationActivity extends BaseActivity {
         mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         mRouteDb = new DataBaseRoute(getApplicationContext()).getWritableDatabase();
 
+        mMapView = findViewById(R.id.route_sim_map);
+        mBaiduMap = mMapView.getMap();
+
         mStatusText = findViewById(R.id.route_sim_status);
         mPrimaryButton = findViewById(R.id.route_sim_primary);
-        mEmptyText = findViewById(R.id.route_sim_empty);
-        mRouteList = findViewById(R.id.route_sim_list);
+        mPickButton = findViewById(R.id.route_sim_pick);
+        mToggleButton = findViewById(R.id.route_sim_toggle);
+        mPanelBody = findViewById(R.id.route_sim_body);
         mSpeedGroup = findViewById(R.id.route_sim_speed_group);
 
         showReceivedCardFields();
 
         mAdapter = new RouteListAdapter();
-        mRouteList.setAdapter(mAdapter);
-        mRouteList.setOnItemClickListener((parent, view, position, id) -> selectRow(position));
+
+        mPickButton.setOnClickListener(v -> showRoutePicker());
+        findViewById(R.id.route_sim_handle).setOnClickListener(v -> togglePanel());
+        applyPanelCollapsed(false);
 
         mSelectedSpeed = speedWalk();
         mSpeedGroup.setOnCheckedChangeListener((group, checkedId) -> onSpeedChipChanged(checkedId));
@@ -164,8 +200,9 @@ public class RouteSimulationActivity extends BaseActivity {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
 
-        // 只存选中行。档位由框架自己恢复 RadioGroup，进度由轮询重新拉，都不必存。
+        // 只存选中行与折叠态。档位由框架自己恢复 RadioGroup，进度由轮询重新拉，都不必存。
         outState.putInt(STATE_SELECTED_INDEX, mSelectedIndex);
+        outState.putBoolean(STATE_PANEL_COLLAPSED, mPanelCollapsed);
     }
 
     @Override
@@ -183,13 +220,17 @@ public class RouteSimulationActivity extends BaseActivity {
         int index = savedInstanceState.getInt(STATE_SELECTED_INDEX, -1);
         if (index >= 0 && index < mRows.size()) {
             mSelectedIndex = index;
-            mAdapter.notifyDataSetChanged();
+            onSelectionChanged();
         }
+
+        applyPanelCollapsed(savedInstanceState.getBoolean(STATE_PANEL_COLLAPSED, false));
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        mMapView.onResume();
+
         // 只在服务已经活着时才绑定：bindService 配 BIND_AUTO_CREATE 会**创建**服务，
         // 而 ServiceGo.onCreate 会装 test provider 并起前台通知——光打开这个界面就把
         // 模拟位置服务启动了，显然不是用户要的。
@@ -208,6 +249,7 @@ public class RouteSimulationActivity extends BaseActivity {
     @Override
     protected void onPause() {
         mPollHandler.removeCallbacks(mPollTask);
+        mMapView.onPause();
         super.onPause();
     }
 
@@ -223,6 +265,8 @@ public class RouteSimulationActivity extends BaseActivity {
             mRouteDb.close();
         }
 
+        mMapView.onDestroy();
+
         // 刻意不停服务：用户切走之后位置要继续移动，那正是本功能的全部意义
         super.onDestroy();
     }
@@ -234,6 +278,30 @@ public class RouteSimulationActivity extends BaseActivity {
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    /*===== 折叠面板 =====*/
+
+    private void togglePanel() {
+        applyPanelCollapsed(!mPanelCollapsed);
+    }
+
+    /**
+     * 收起/展开面板。
+     *
+     * <p>收起后必须留一个可点的把手（就是 {@code route_sim_handle} 那一行），否则展不回来；
+     * 状态文本钉在把手上，所以播放中收起也还看得见进度。箭头与无障碍描述跟着翻转，
+     * 与绘制界面工具条那个箭头片同一套路子。
+     */
+    private void applyPanelCollapsed(boolean collapsed) {
+        mPanelCollapsed = collapsed;
+        mPanelBody.setVisibility(collapsed ? View.GONE : View.VISIBLE);
+        mToggleButton.setText(collapsed
+                ? R.string.route_sim_arrow_expand
+                : R.string.route_sim_arrow_collapse);
+        mToggleButton.setContentDescription(getResources().getString(collapsed
+                ? R.string.route_sim_panel_expand
+                : R.string.route_sim_panel_collapse));
     }
 
     /*===== NFC 交接字段 =====*/
@@ -271,7 +339,7 @@ public class RouteSimulationActivity extends BaseActivity {
         return isEmpty(value) ? "—" : value;
     }
 
-    /*===== 路线列表 =====*/
+    /*===== 路线列表与地图 =====*/
 
     private void loadRoutes() {
         mRows.clear();
@@ -289,9 +357,9 @@ public class RouteSimulationActivity extends BaseActivity {
             mSelectedIndex = -1;
         }
 
-        mEmptyText.setVisibility(mRows.isEmpty() ? View.VISIBLE : View.GONE);
         mPrimaryButton.setEnabled(!mRows.isEmpty());
-        mAdapter.notifyDataSetChanged();
+        updatePickButtonText();
+        updateMapForSelection();
         refreshProgress();
     }
 
@@ -313,12 +381,141 @@ public class RouteSimulationActivity extends BaseActivity {
         return new RouteRow(config, wgs, total);
     }
 
+    /**
+     * 选中一条路线：弹出列表对话框。
+     *
+     * <p>直接把 {@link RouteListAdapter} 交给对话框，弹窗里的行与原来那个列表**是同一份
+     * 渲染**（两行式：名称 / 点数·闭合·总长），没有第二套。
+     *
+     * <p>库里没有路线时没有东西可选，改用一句话说明去哪儿画。
+     */
+    private void showRoutePicker() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(R.string.route_sim_list_title);
+
+        if (mRows.isEmpty()) {
+            builder.setMessage(R.string.route_sim_empty);
+        } else {
+            builder.setAdapter(mAdapter, (dialog, which) -> {
+                selectRow(which);
+                dialog.dismiss();
+            });
+        }
+
+        builder.show();
+    }
+
     private void selectRow(int index) {
         if (index == mSelectedIndex) {
             return;
         }
         mSelectedIndex = index;
+        onSelectionChanged();
+    }
+
+    /** 选中行变过之后要一起刷的三样：对话框里的高亮、按钮文案、地图上的线与相机。 */
+    private void onSelectionChanged() {
         mAdapter.notifyDataSetChanged();
+        updatePickButtonText();
+        updateMapForSelection();
+    }
+
+    /** 按钮上写出当前选中的是哪条——列表挪进对话框之后，这是唯一的文字线索。 */
+    private void updatePickButtonText() {
+        if (mSelectedIndex >= 0 && mSelectedIndex < mRows.size()) {
+            mPickButton.setText(getResources().getString(R.string.route_sim_pick_route_named,
+                    mRows.get(mSelectedIndex).config.getName()));
+        } else {
+            mPickButton.setText(R.string.route_sim_list_title);
+        }
+    }
+
+    /**
+     * 按当前选中重画地图上的折线，并把相机框到那条路线。
+     *
+     * <p>用的是 {@link RouteConfig#getPoints()} 那份 <b>BD09</b> 点——百度地图原生坐标系，
+     * 不做任何换算（喂给服务的 WGS84 那一份在 {@link RouteRow#wgsPoints} 里，别混）。
+     */
+    private void updateMapForSelection() {
+        if (mBaiduMap == null) {
+            return;
+        }
+        try {
+            if (mRouteLine != null) {
+                mRouteLine.remove();
+                mRouteLine = null;
+            }
+            if (mSelectedIndex < 0 || mSelectedIndex >= mRows.size()) {
+                return;
+            }
+
+            RouteConfig config = mRows.get(mSelectedIndex).config;
+            List<LatLng> points = config.getPoints();
+            if (points.size() < 2) {
+                // 一个点连不成线。不画，但也不动相机。
+                return;
+            }
+
+            if (config.isClosed()) {
+                // 闭合路线要把首点再补到末尾才画得出那段回程。列表里显示的总长是含回程的
+                // （RoutePlayer 对闭合路线把首尾当成一段），两者必须一致。
+                List<LatLng> loop = new ArrayList<>(points);
+                loop.add(points.get(0));
+                points = loop;
+            }
+
+            mRouteLine = (Polyline) mBaiduMap.addOverlay(new PolylineOptions()
+                    .points(points)
+                    .color(getResources().getColor(R.color.colorPrimary, getTheme()))
+                    .width((int) (ROUTE_LINE_WIDTH_DP * getResources().getDisplayMetrics().density)));
+
+            fitCameraTo(points);
+        } catch (Exception e) {
+            XLog.e("ROUTE_SIM: ERROR - updateMapForSelection");
+        }
+    }
+
+    /**
+     * 把相机框到这条路线，留一点边距。
+     *
+     * <p><b>只在选中路线时动相机</b>——轮询里绝不动，否则用户没法自己拖地图。
+     * 尺寸要等布局完成才有值，所以投到 {@link MapView} 的消息队列里跑；
+     * {@code post} 在 View 还没 attach 时会排队，attach 后执行，两边都安全。
+     */
+    private void fitCameraTo(List<LatLng> points) {
+        mMapView.post(() -> {
+            try {
+                if (mBaiduMap == null || mMapView.getWidth() == 0 || mMapView.getHeight() == 0) {
+                    return;
+                }
+
+                LatLngBounds.Builder builder = new LatLngBounds.Builder();
+                double minLat = Double.MAX_VALUE;
+                double maxLat = -Double.MAX_VALUE;
+                double minLng = Double.MAX_VALUE;
+                double maxLng = -Double.MAX_VALUE;
+                for (LatLng point : points) {
+                    builder.include(point);
+                    minLat = Math.min(minLat, point.latitude);
+                    maxLat = Math.max(maxLat, point.latitude);
+                    minLng = Math.min(minLng, point.longitude);
+                    maxLng = Math.max(maxLng, point.longitude);
+                }
+
+                if (maxLat <= minLat && maxLng <= minLng) {
+                    // 所有点重合：LatLngBounds 退化成一个点，交给 newLatLngBounds 求缩放会退化
+                    // （跨度为 0 时算出的级别没有意义）。改用一个固定的近景级别。
+                    mBaiduMap.setMapStatus(MapStatusUpdateFactory.newLatLngZoom(
+                            points.get(0), SINGLE_POINT_ZOOM));
+                    return;
+                }
+
+                mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newLatLngBounds(
+                        builder.build(), mMapView.getWidth(), mMapView.getHeight()));
+            } catch (Exception e) {
+                XLog.e("ROUTE_SIM: ERROR - fitCameraTo");
+            }
+        });
     }
 
     /**
@@ -541,10 +738,12 @@ public class RouteSimulationActivity extends BaseActivity {
         }
     }
 
-    /*===== 进度 =====*/
+    /*===== 进度与当前位置 =====*/
 
     private void refreshProgress() {
         RouteProgress progress = currentProgress();
+
+        updatePositionMarker(progress);
 
         if (progress == null) {
             mStatusText.setText(R.string.route_sim_status_idle);
@@ -577,6 +776,51 @@ public class RouteSimulationActivity extends BaseActivity {
         } else {
             mStatusText.setText(getResources().getString(
                     R.string.route_sim_status_playing, covered, total));
+        }
+    }
+
+    /**
+     * 刷新地图上的当前位置标记。
+     *
+     * <p>挂在既有的 500ms 轮询里，<b>不新增定时器</b>。没有路线在跑（快照为 null）时
+     * 标记不显示；到达终点后快照仍在（服务刻意不自动结束），标记停在终点，这是对的。
+     *
+     * <p>位置由 {@link ServiceGo.ServiceGoBinder#getCurrentPosition()} 给的是 <b>WGS84</b>，
+     * 画到百度地图上要 BD09：{@code MapUtils.wgs2bd09} 入参 (经度, 纬度)、返回 {经度, 纬度}，
+     * 而 {@link LatLng} 构造是 (纬度, 经度)。这是本界面唯一一处坐标换算，别在别处再加。
+     */
+    private void updatePositionMarker(RouteProgress progress) {
+        if (mBaiduMap == null) {
+            return;
+        }
+        try {
+            if (progress == null || mServiceBinder == null) {
+                if (mPositionMarker != null) {
+                    mPositionMarker.setVisible(false);
+                }
+                return;
+            }
+
+            double[] wgs = mServiceBinder.getCurrentPosition();
+            if (wgs == null || wgs.length < 2
+                    || !Double.isFinite(wgs[0]) || !Double.isFinite(wgs[1])) {
+                XLog.e("ROUTE_SIM: ERROR - updatePositionMarker: 非法坐标");
+                return;
+            }
+
+            double[] bd09 = MapUtils.wgs2bd09(wgs[0], wgs[1]);
+            LatLng position = new LatLng(bd09[1], bd09[0]);
+
+            if (mPositionMarker == null) {
+                mPositionMarker = (Marker) mBaiduMap.addOverlay(new MarkerOptions()
+                        .position(position)
+                        .icon(BitmapDescriptorFactory.fromResource(R.drawable.ic_home_position)));
+            } else {
+                mPositionMarker.setPosition(position);
+                mPositionMarker.setVisible(true);
+            }
+        } catch (Exception e) {
+            XLog.e("ROUTE_SIM: ERROR - updatePositionMarker");
         }
     }
 
