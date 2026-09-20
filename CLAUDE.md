@@ -182,8 +182,12 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
   `Thread.sleep(100)` 会漂，几公里的路线上累积误差肉眼可见；上限是防 doze / GC 长暂停之后一次跳出几百米。
   取时钟、更新 `mLastTickMs` 基准刻意放在 `try` **外面**——基准必须无条件每 tick 前移，否则某 tick
   一抛异常基准就停在过去，此后每次 `dt` 都吃满上限。
-- **`startRoute()` 的两条拒绝是承重的，不是防御性装饰。** 点数不足 2 与总长为 0 是两种不同的坏输入：
-  两个**重合**的点能过第一条而总长仍为 0。`RoutePlayer.isFinished()` 对零长路线返回 true
+- **`startRoute()` 的两条拒绝各有各的不可省之处，但都不是「防御性装饰」这个笼统说法能覆盖的。**
+  单就「拒绝」而言，「点数 < 2」那一半是被第二条吞掉的：0 点或 1 点的数组在 `RoutePlayer` 里算出的总长
+  必为 0（少于 2 个点根本成不了段），第二条同样拦得住。第一条真正不可省的是 **`wgsPoints == null` 的
+  短路**——少了它，null 输入会当场或在那道逐行验形上抛 NPE（`.length` / for-each 解引用），而
+  `startRoute` 没有 try/catch，异常会逃到主线程，违反「记日志后降级」的约定。反过来第二条也不能被第一条
+  替代：两个**重合**的点长度是 2，过得了第一条，而总长仍是 0。`RoutePlayer.isFinished()` 对零长路线返回 true
   （`!mClosed && mDistance >= mTotalDistance`，即 `0 >= 0`）：零长的**开环**路线一开始就是「已到达」，
   `advanceRoute()` 每 tick 在开头早退，位置永远不动而通知与界面写着「已到达终点」；零长的**闭合**路线
   反过来——永远不推进也永远不结束。两条之间还有一道逐行验形（null 行 / 长度不足 / 非有限值），非有限值
@@ -193,7 +197,8 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
   从一次 `advance() + getPosition()` 缩到相邻几条指令；彻底的单写者要把所有写者（含摇杆那一路）都并到
   定位线程，是另一个量级的改动，没做。推论：**`JoyStick.setCurrentPosition` 绝不能每 tick 调**——它会
   `mBaiduMap.clear()` 并 `animateMapStatus`，10Hz 下地图会被拖着抖。位置回写只写单元格，地图同步只在
-  开始 / 结束 / 到达时做。
+  这几个时点做：启动服务的 `onStartCommand`、瞬移 `setPosition()`、开始 `startRoute()`、结束
+  `stopRoute()`、到达 `onRouteFinished()`。
 - **摇杆禁用分两层，缺一不可。** 权威层是 `ServiceGo` 的两个 listener 回调（播放期间一律忽略摇杆输入）；
   `JoyStick.setInputEnabled` 加它自己四个入口（方向收口 `processDirection`、窗口拖拽的 `onTouch`、内置地图
   落点、历史列表选点）的守卫，是让「禁用」在观感上成立。界面层入口分散，单靠它拦不干净；单靠服务层则是
@@ -211,9 +216,12 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
   所以选中行还经 `onSaveInstanceState` 存索引。存索引成立的前提是 `queryAll` 的排序确定
   （`db.query(...)` **第 7 个参数**是 `CREATED_AT DESC`；该列是秒级的，同一秒创建的两条并列时 SQLite
   不保证相对顺序）。**若改了那个排序，恢复必须改成按名字查找**，否则旋转后会静默选中另一条路线。
-- **列表行的选中态键在 `state_activated`**（`ListView` 对非 `Checkable` 的行调 `setActivated`），所以键在
-  `state_checked` 的 `bg_tool_chip_toggle` / `chip_text_toggle` **不能**复用到行上——状态键对不上是
-  **静默失败**：编得过、lint 过，选中就是没有视觉变化。行用 `bg_route_row` / `route_row_text`。
+- **列表行的选中态键在 `state_activated`，而这个激活态是适配器自己在 `getView` 里
+  `row.setActivated(position == mSelectedIndex)` 设上的**（回收复用，所以两个方向都要显式设）。`ListView`
+  那条自动激活路径只在 `setItemChecked` / `setChoiceMode` 系列被调用时才走，本界面从未调用它们（全仓
+  grep 无命中）——**别因为看到「ListView 会自动置激活态」就省掉这行 `setActivated`**。键在 `state_checked`
+  的 `bg_tool_chip_toggle` / `chip_text_toggle` **不能**复用到行上：状态键对不上是**静默失败**，编得过、
+  lint 过，选中就是没有视觉变化。行用 `bg_route_row` / `route_row_text`。
 - **`bindService` 配 `BIND_AUTO_CREATE` 会创建服务**，而 `ServiceGo.onCreate` 会装 test provider 并起前台
   通知——光打开模拟界面就把模拟位置服务启动了，显然不是用户要的。所以界面只在 `ServiceGo.isAlive()` 时才在
   `onResume` 里绑定；服务没活着就不可能有路线在跑。`startSimulation()` 则无条件 `startForegroundService`，
@@ -225,8 +233,11 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
 的代理（它守着两处 `unbindService`），而 `mServiceBinder` 只在 MainActivity 自己的连接里赋值。从模拟界面
 启动路线再回到主界面时它仍是 false：FAB 图标停在 `ic_position`（「未启动」）而服务其实活着、路线正在跑。
 此时在地图上点一个标记点、连按两次 FAB 就会落到 `stopGoLocation()` → `stopService`——第一次按走的是
-`startGoLocation()`（它同样不知道路线在跑：会再 bind 一次、把位置瞬移到标记点、把 `isMockServStart` 置 true），
-第二次按因为标记点已被清掉就进了停止分支，**静默停掉正在跑的路线和整个 mock 位置服务**。正确修法是让
+`startGoLocation()`（它同样不知道路线在跑：会再 bind 一次，并把位置单元格写成那个标记点、把
+`isMockServStart` 置 true；那次写入约 100ms 后就被 `advanceRoute()` 用路线位置覆盖，位置不会真停在
+标记点上），
+第二次按因为标记点已被清掉就进了停止分支：服务停掉、模拟位置终止，Snackbar 会提示「模拟位置已终止」，
+但**正在跑的那条路线是被一并杀掉的，这一步没有任何提示**。正确修法是让
 「是否绑定」与「服务是否存活」分开记、FAB 状态从服务反推，没做。同类记账问题：
 `RouteSimulationActivity.mBound` 只在 `onServiceConnected` 里置 true，而 `bindService` 有两处发出点
 （`onResume` 与 `startSimulation` 的补发路径），连接没落地的那次绑定不会被 `unbindService` 释放。
