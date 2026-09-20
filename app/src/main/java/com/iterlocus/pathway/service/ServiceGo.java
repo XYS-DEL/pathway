@@ -114,9 +114,20 @@ public class ServiceGo extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        mCurLng = intent.getDoubleExtra(MainActivity.LNG_MSG_ID, DEFAULT_LNG);
-        mCurLat = intent.getDoubleExtra(MainActivity.LAT_MSG_ID, DEFAULT_LAT);
-        mCurAlt = intent.getDoubleExtra(MainActivity.ALT_MSG_ID, DEFAULT_ALT);
+        // 系统以 START_STICKY 重启本服务时会用 null Intent 调进来——这是文档化的正常路径
+        // （super 的默认返回值就是 START_STICKY），不是异常输入，但直接解引用会在主线程
+        // 抛 NPE 崩溃。按项目约定记日志后降级：三个值退回服务自己的缺省值。重启出来的是
+        // 新实例，字段本来就在缺省值上，这里显式写一遍是为了让降级点看得见。
+        if (intent == null) {
+            XLog.e("SERVICEGO: ERROR - onStartCommand: intent 为 null");
+            mCurLng = DEFAULT_LNG;
+            mCurLat = DEFAULT_LAT;
+            mCurAlt = DEFAULT_ALT;
+        } else {
+            mCurLng = intent.getDoubleExtra(MainActivity.LNG_MSG_ID, DEFAULT_LNG);
+            mCurLat = intent.getDoubleExtra(MainActivity.LAT_MSG_ID, DEFAULT_LAT);
+            mCurAlt = intent.getDoubleExtra(MainActivity.ALT_MSG_ID, DEFAULT_ALT);
+        }
 
         mJoyStick.setCurrentPosition(mCurLng, mCurLat, mCurAlt);
 
