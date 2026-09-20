@@ -180,6 +180,26 @@ public class RoutePlayerTest {
     }
 
     @Test
+    public void closedRouteWithCoincidentPointsDoesNotProduceNaN() {
+        // 两点重合的闭合路线：能过「点数 >= 2」，却总长为 0。
+        // 这是「点数」与「总长」两道拒绝不可互相替代的实证，也是 advance 里
+        // mTotalDistance <= 0d 那道守卫唯一能拦住的东西——去掉它，
+        // mDistance %= mTotalDistance 会得到 NaN，圈数会变成 Integer.MAX_VALUE。
+        RoutePlayer player = new RoutePlayer(new double[][]{{0d, 0d}, {0d, 0d}}, true, 100d);
+        // 先把前提钉住：本用例的全部意义都建立在「总长恰为 0」上。
+        // 若日后距离算法变动使两点重合不再给出 0，这条断言会先红，
+        // 而不是让下面的断言因为前提消失而悄悄变成空过。
+        assertEquals(0d, player.getTotalDistance(), 1e-9);
+        player.advance(10d);
+
+        assertEquals(0d, player.getDistanceCovered(), 1e-9);
+        assertEquals(0, player.getLapCount());
+        assertEquals(0d, player.getPosition()[0], 1e-9);
+        assertEquals(0d, player.getPosition()[1], 1e-9);
+        assertFalse(player.isFinished());
+    }
+
+    @Test
     public void zeroSpeedDoesNotMove() {
         RoutePlayer player = new RoutePlayer(eastLine(), false, 0d);
         player.advance(100d);
