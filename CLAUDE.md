@@ -171,6 +171,32 @@ Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the orig
   GL 覆盖层与一次性定位客户端，旋转会重建 Activity，把用户正在画的那条路线连同撤销栈一起丢掉。
   整个 App 当前不支持横屏；若日后要放开绘制页，应先做点集持久化，而不是直接删掉这行。
 
+### 历史路线
+
+侧滑菜单「历史路线」→ `RouteHistoryActivity`（`exported="false"`）：列出全部已保存路线，可编辑、可删除。
+数据来自 `DataBaseRoute.queryAll`，在 `onResume` 里重载——从编辑页返回后自动刷新，不靠 result 回传。
+DB 打不开时 `mRouteDb` 保持 null 并 toast，`reloadRoutes` 判空跳过查询，不让空指针逃出去。
+
+- **编辑是把路线名当参数交给 `RouteDrawActivity`**（`EXTRA_EDIT_ROUTE_NAME`）。该 Activity 在
+  `onCreate` 里 `loadRouteForEdit()`，并**跳过** `centerOnCurrentLocation()`——否则会把用户刚载入的
+  路线框走。载入后重置撤销栈并压入一个基准快照，所以「编辑」是干净的一等路径，不是叠在旧栈上。
+- **删除**走二次确认弹窗（标题与正文都带路线名），再 `DataBaseRoute.deleteRoute`。
+- `DataBaseRoute` 本次新增三个公开方法：`queryByName`（取不到返回 null）、`updateRoute`
+  （**原地更新，不产生副本**）、`deleteRoute`。三者都以 `db == null || name == null` 早退，统一
+  `try/catch → XLog.e + 安全返回值`，符合「记日志后降级」的约定；判据都是「恰好影响 1 行」
+  （`db.update(...) == 1` / `delete(...) == 1`），不是「没抛异常」。
+- **`updateRoute` 只写 name / closed / points，不写 `CREATED_AT`**——编辑过的路线在 `queryAll` 的
+  `CREATED_AT DESC` 排序里**保持原位**。有意为之：改内容不该让它在列表里跳来跳去。
+- **「同名拒绝写入」仍然成立，但权柄在列约束上，不在代码里。** `insertRoute` 内部**没有**显式的重名
+  检查，它直接 `db.insert`；拒绝重名靠两层——调用方的 `nameExists` 预检，以及
+  `COLLATE NOCASE UNIQUE` 列约束（冲突时 `insert` 返回 -1）。**预检只是为了给出更好的文案**，
+  真正的兜底是列约束，别把预检当成保证。
+- **改名时的重名预检只在「真的改了名」时才做**（`RouteDrawActivity` 用 `!editing || renamed`，
+  而 `renamed` 用 `equalsIgnoreCase` 判定）。少这个条件，「不改名的原地保存」会被自己挡住。
+  副作用：仅大小写不同的改名（`abc` → `ABC`）不走预检，直接落到 `updateRoute`。
+- `RouteDrawActivity.saveRoute()` 编辑分支里的 `setResult(RESULT_OK)` **目前没有消费者**——
+  `RouteHistoryActivity` 用 `startActivity` 启动它、不接 result。无害，但别以为它在传值。
+
 ### 路线模拟
 
 侧滑菜单「模拟路线」→ `RouteSimulationActivity`（`exported="false"`）：选一条已保存的路线、选速度档位、
@@ -273,13 +299,13 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
 `RouteSimulationActivity.mBound` 只在 `onServiceConnected` 里置 true，而 `bindService` 有两处发出点
 （`onResume` 与 `startSimulation` 的补发路径），连接没落地的那次绑定不会被 `unbindService` 释放。
 
-**这个界面至今没有在任何设备上渲染过**（`exported="false"`，本机没有 arm64 设备或模拟器镜像，APK 只有
-arm64-v8a）：行选中态的观感、速度档位片、空态与禁用态、按钮对比度、大字号下档位行是否被裁，**全部未经
-视觉验收**。本项目已有一次同类教训（见上一节：纯读代码判定「顶多是一道浅缝」，截图是一大块白块）。
-这是开放项，不是已完成。
+**这个界面的观感由用户实机验收，代理不得自行判断。** `exported="false"`、本机没有 arm64 设备或模拟器
+镜像、APK 只有 arm64-v8a——代理既拉不起来也截不了图，布局与配色只能由用户跑真机后反馈。本项目已有一次
+同类教训（见上一节：纯读代码判定「顶多是一道浅缝」，截图是一大块白块）。本界面已由用户实机验收并据此
+迭代过：`activity_route_simulation.xml` 里那段底色注释记录的正是一次真实的渲染观感问题。
 
-**待办**：NFC 卡片 URL 的解析（现在只把收到的 URL / 包名 / source 原样显示供核对）；路线的编辑与删除；
-播放期间的实时轨迹回放；速度自由输入。
+**待办**：NFC 卡片 URL 的解析（现在只把收到的 URL / 包名 / source 原样显示供核对）；播放期间的实时轨迹
+回放；速度自由输入。
 
 ### 读取 NFC
 
