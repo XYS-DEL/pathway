@@ -430,6 +430,17 @@ public class ServiceGo extends Service {
             if (wgsPoints == null || wgsPoints.length < RouteGeometry.MIN_POINTS_FOR_CLOSE) {
                 return false;
             }
+            // 逐行验形。RoutePlayer 的构造器直接下标取值，null 行或长度不足会抛
+            // NPE/AIOOBE；非有限值则会让下面第二条拒绝失效（NaN <= 0d 为 false），
+            // 于是被当成合法路线收下，最后表现为一个永远不结束、位置是 NaN 的模拟。
+            // 这是 binder 上的公开入口、数据来自别的组件，按项目约定必须记日志后降级而不是抛。
+            for (double[] point : wgsPoints) {
+                if (point == null || point.length < 2
+                        || !Double.isFinite(point[0]) || !Double.isFinite(point[1])) {
+                    XLog.e("SERVICEGO: ERROR - startRoute: 非法坐标行");
+                    return false;
+                }
+            }
             RoutePlayer player = new RoutePlayer(wgsPoints, closed, speedMps);
             if (player.getTotalDistance() <= 0d) {
                 return false;
