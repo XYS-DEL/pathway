@@ -48,6 +48,22 @@ public class RoutePlayerTest {
         assertEquals(100d, player.getDistanceCovered(), 1e-6);
     }
 
+    /**
+     * 经度是第一个参数——顺序传反必须被抓住。
+     *
+     * <p><b>本测试刻意放在北纬 60°，不要挪回赤道附近。</b>赤道上 1° 经度与 1° 纬度都是
+     * ≈1111.95 米，两条轴等距，「沿纬线量」与「沿经线量」得到同一个长度，
+     * 顺序传反在赤道附近完全看不出来（已用变异测试证实：把 {@code RoutePlayer} 里
+     * {@code distanceMeters} 的实参调换，其余测试全绿）。
+     * 北纬 60° 处 1° 经度只剩 ≈556 米，两轴不再等距，调换后 556 会变成 1112。
+     */
+    @Test
+    public void distanceUsesLongitudeFirst() {
+        // {经度, 纬度}：沿北纬 60° 向东 0.01°，正确 ≈555.98 米，顺序传反则 ≈1111.95 米。
+        RoutePlayer player = new RoutePlayer(new double[][]{{0d, 60d}, {0.01d, 60d}}, false, 0d);
+        assertEquals(556d, player.getTotalDistance(), 2d);
+    }
+
     @Test
     public void halfwayAlongStraightLineIsTheMidpoint() {
         RoutePlayer player = new RoutePlayer(eastLine(), false, 0d);
@@ -148,9 +164,19 @@ public class RoutePlayerTest {
 
     @Test
     public void aSinglePointCannotBeClosed() {
-        RoutePlayer player = new RoutePlayer(new double[][]{{0d, 0d}}, true, 100d);
-        player.advance(10d);
-        assertEquals(0d, player.getDistanceCovered(), 1e-9);
+        double[][] single = {{0d, 0d}};
+
+        RoutePlayer closed = new RoutePlayer(single, true, 100d);
+        closed.advance(10d);
+        assertEquals(0d, closed.getDistanceCovered(), 1e-9);
+
+        // 闭合需要至少 2 个点，单点闭合必须退化成一个零长度的开环路线。
+        // 这里断言 isFinished() 而不是再断言一次距离：零长度路线的距离恒为 0，
+        // 断言它由构造成立——删掉构造器里的 count >= 2 守卫也照样绿（已用变异测试证实）。
+        // isFinished() 才是那个守卫的可观测量：零长度开环「已走完」（true），
+        // 而闭合路线永远不会 finished，守卫一旦缺失这里会变成 false。
+        assertTrue(closed.isFinished());
+        assertEquals(0, closed.getLapCount());
     }
 
     @Test
