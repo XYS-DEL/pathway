@@ -111,7 +111,7 @@
         android:focusable="true"
         android:gravity="center"
         android:text="@string/route_sim_start"
-        android:textColor="@color/chip_text"
+        android:textColor="@color/chip_text_accent"
         android:textSize="16sp"
         android:textStyle="bold" />
 

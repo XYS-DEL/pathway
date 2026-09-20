@@ -57,6 +57,9 @@ public class RouteSimulationActivity extends BaseActivity {
 
     private static final long PROGRESS_POLL_MS = 500L;
 
+    /** 系统重建时存/取选中行。行序取自 DataBaseRoute.queryAll（按创建时间倒序），是稳定的。 */
+    private static final String STATE_SELECTED_INDEX = "STATE_SELECTED_INDEX";
+
     /** 列表的一行：原始配置 + 换算后的 WGS84 点集 + WGS84 总长。 */
     private static final class RouteRow {
         final RouteConfig config;
@@ -158,6 +161,30 @@ public class RouteSimulationActivity extends BaseActivity {
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+
+        // 只存选中行。档位由框架自己恢复 RadioGroup，进度由轮询重新拉，都不必存。
+        outState.putInt(STATE_SELECTED_INDEX, mSelectedIndex);
+    }
+
+    @Override
+    protected void onRestoreInstanceState(Bundle savedInstanceState) {
+        super.onRestoreInstanceState(savedInstanceState);
+
+        // 恢复选中行不能只靠 refreshProgress 里的 selectRowByName：那条路要
+        // progress.getRouteName()，**没有路线在跑时压根没有快照**，于是选中行会回到 -1
+        // （用户点「开始模拟」得到「请先选一条路线」），而 RadioGroup 的档位却被框架恢复了——
+        // 这种不对称会被读成 bug。
+        // 此时 loadRoutes() 已在 onCreate 里跑完，mRows 与 mAdapter 都已就绪。
+        int index = savedInstanceState.getInt(STATE_SELECTED_INDEX, -1);
+        if (index >= 0 && index < mRows.size()) {
+            mSelectedIndex = index;
+            mAdapter.notifyDataSetChanged();
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         // 只在服务已经活着时才绑定：bindService 配 BIND_AUTO_CREATE 会**创建**服务，
@@ -205,18 +232,35 @@ public class RouteSimulationActivity extends BaseActivity {
 
     private void showReceivedCardFields() {
         Intent intent = getIntent();
-        StringBuilder builder = new StringBuilder();
-        builder.append(getResources().getString(R.string.route_sim_received)).append("\n\n");
-        builder.append(EXTRA_CARD_URL).append(":\n").append(orDash(intent.getStringExtra(EXTRA_CARD_URL))).append("\n\n");
-        builder.append(EXTRA_CARD_PACKAGE).append(":\n").append(orDash(intent.getStringExtra(EXTRA_CARD_PACKAGE))).append("\n\n");
-        builder.append(EXTRA_SOURCE).append(":\n").append(orDash(intent.getStringExtra(EXTRA_SOURCE)));
+        String url = intent.getStringExtra(EXTRA_CARD_URL);
+        String packageName = intent.getStringExtra(EXTRA_CARD_PACKAGE);
+        String source = intent.getStringExtra(EXTRA_SOURCE);
 
         TextView content = findViewById(R.id.route_sim_content);
+
+        // 从侧滑菜单进来时三个字段全空，这块是给开发者看的调试卷，
+        // 常驻在用户可见界面上只会是三行「—」的噪音（大字号下它也是被挤出屏幕的那一块）。
+        // 从 NFC 卡片进来时照旧显示，核对交接的用途不变。
+        if (isEmpty(url) && isEmpty(packageName) && isEmpty(source)) {
+            content.setVisibility(View.GONE);
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(getResources().getString(R.string.route_sim_received)).append("\n\n");
+        builder.append(EXTRA_CARD_URL).append(":\n").append(orDash(url)).append("\n\n");
+        builder.append(EXTRA_CARD_PACKAGE).append(":\n").append(orDash(packageName)).append("\n\n");
+        builder.append(EXTRA_SOURCE).append(":\n").append(orDash(source));
+
         content.setText(builder.toString());
     }
 
+    private boolean isEmpty(String value) {
+        return value == null || value.isEmpty();
+    }
+
     private String orDash(String value) {
-        return value == null || value.isEmpty() ? "—" : value;
+        return isEmpty(value) ? "—" : value;
     }
 
     /*===== 路线列表 =====*/
