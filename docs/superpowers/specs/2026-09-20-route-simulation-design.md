@@ -41,15 +41,16 @@
 
 ```java
 public final class RoutePlayer {
-    RoutePlayer(List<double[]> wgsPoints, boolean closed, double speedMetersPerSecond)
+    RoutePlayer(double[][] wgsPoints, boolean closed, double speedMetersPerSecond)
 
     void     advance(double dtSeconds);      // 推进；越界自己夹住
-    double[] getPosition();                  // {经度, 纬度}，WGS84
+    double[] getPosition();                  // {经度, 纬度}，WGS84；无点时返回 null
     double   getBearing();                   // 当前线段航向，度，0–360
     double   getDistanceCovered();           // 米
     double   getTotalDistance();             // 米
+    int      getLapCount();                  // 闭合路线已完成的圈数
     boolean  isFinished();
-    void     setSpeed(double mps);           // 播放中可改
+    void     setSpeed(double mps);           // 播放中可改；0 表示暂停
 }
 ```
 
@@ -65,27 +66,33 @@ public final class RoutePlayer {
 
 ### ⚠️ 坐标系：`RoutePlayer` 只认 WGS84
 
-入参是 `List<double[]>`，每个元素是 `{经度, 纬度}` 的 **WGS84**——正是 `MapUtils.bd2wgs()` 的返回形状。
+入参是 `double[][]`，每个元素是 `{经度, 纬度}` 的 **WGS84**——正是 `MapUtils.bd2wgs()` 的返回形状。
 
 **刻意不收 `LatLng`。** 两个理由：
 
 1. `LatLng` 在这套代码里既被用来装 BD09（地图层）也被用来装别的，**类型本身不携带坐标系信息**。用 `double[]` 至少能让「这是服务边界、是 WGS84」这件事在签名上看得见
 2. 这个项目最大的坑就是坐标系混用（CLAUDE.md 专门有一节），减少一处歧义就少一处 bug
 
-**BD09 → WGS84 的转换在「开始模拟」时一次性做完**（`RouteSimulationActivity` 逐个 `MapUtils.bd2wgs(p.longitude, p.latitude)`），不是每 tick 做。
+**用 `double[][]` 而不是 `List<double[]>`**：`RouteGeometry` 要新增的 `totalLengthMeters(double[][], boolean)` 若写成 `List<double[]>`，会与现有的 `totalLengthMeters(List<LatLng>, boolean)` **擦除后签名相同而无法重载**（编译期 name clash）。统一用数组，整条链路（界面 → binder → 引擎 → 几何）都是 `double[][]`，顺带避开这个坑。
+
+**BD09 → WGS84 的转换在载入列表时一次性做完**（`RouteSimulationActivity` 逐个 `MapUtils.bd2wgs(p.longitude, p.latitude)`），结果随行保存、复用；不是每 tick 做，也不是选中时才做。
 
 ### 几何计算复用 `RouteGeometry`，不复制
 
-`RouteGeometry` 现有 `distanceMeters(LatLng, LatLng)` 与 `totalLengthMeters(List<LatLng>, boolean)`。`RoutePlayer` 需要的是 `double` 版本。
+`RouteGeometry` 现有 `distanceMeters(LatLng, LatLng)` 与 `totalLengthMeters(List<LatLng>, boolean)`。`RoutePlayer` 需要 `double` 版本。
 
-**做法**：`RouteGeometry` 新增
+**做法**：`RouteGeometry` 新增两个标量函数
 
 ```java
 public static double distanceMeters(double lng1, double lat1, double lng2, double lat2)
 public static double initialBearingDegrees(double lng1, double lat1, double lng2, double lat2)
 ```
 
-并把现有的 `distanceMeters(LatLng, LatLng)` 改为**委托**给新的 double 版本（`totalLengthMeters` 同理）。
+并把现有的 `distanceMeters(LatLng, LatLng)` 改为**委托**给新的 double 版本，haversine 的算式只留一份。
+
+**不给 `RouteGeometry` 加 `totalLengthMeters` 的 double 版本。** 折线总长由 `RoutePlayer` 在构造时算出来——它本来就要建累积距离数组，`mCumulative[段数]` 就是总长，白拿。给 `RouteGeometry` 再加一个 double 版只会多一份重复的循环，或者让 `List<LatLng>` 版本为了委托而多分配一堆中间数组换回同样的结果。
+
+**因此列表里显示的总长也由 `RoutePlayer` 算**：载入时对每条路线构造一个速度为 0 的实例，读 `getTotalDistance()`。这不是绕路——规格要求列表总长与引擎一致，那就用引擎本身去算，是最强的「一致」。
 
 不要在两处各写一份 haversine——审查规则把逐字重复的逻辑块视为缺陷。
 
@@ -102,8 +109,9 @@ public final class RouteProgress {
     String  getRouteName();          // 正在跑的路线名
     boolean isFinished();            // true = 已到达终点
     double  getSpeed();              // m/s
-    double  getDistanceCovered();    // 米
+    double  getDistanceCovered();    // 本圈已走，米
     double  getTotalDistance();      // 米
+    int     getLapCount();           // 闭合路线已完成的圈数；开环恒为 0
 }
 ```
 
@@ -120,6 +128,8 @@ public final class RouteProgress {
 **`getRouteName()` 是必需的，不是装饰。** 界面靠它恢复状态：系统重建（旋转、进程被回收后回到前台）时，Activity 手上没有任何「我刚跑了哪条」的记忆，只有轮询回来的这个快照。没有它，重建后列表里没有一行是选中的，但按钮却写着「结束路线」——自相矛盾。有了它，`onResume` 第一轮轮询就能把选中行、档位、按钮文案全部对回去。
 
 这也是选择轮询而非回调注册的意义所在：服务是唯一事实源，界面任何时刻都能从零重建出正确状态。
+
+**`getLapCount()` 是为了让闭合路线的进度读数不说谎。** 闭合路线每绕完一圈 `getDistanceCovered()` 就回零重来，界面上表现为「已走 2.1km / 2.1km」突然跳回「已走 0m」——用户会当它是 bug。有了圈数，界面可以写成「第 3 圈 · 已走 200m / 2.1km」，归零就有了明确的解释。开环路线恒为 0，界面据此不显示圈数。
 
 ## `ServiceGo` 改动
 
@@ -149,7 +159,7 @@ if (mRoutePlayer != null && !mRoutePlayer.isFinished()) {
 ### Binder 新增三个方法
 
 ```java
-public boolean       startRoute(String routeName, List<double[]> wgsPoints,
+public boolean       startRoute(String routeName, double[][] wgsPoints,
                                 boolean closed, double speedMps)
 public void          stopRoute()
 public RouteProgress getRouteProgress()   // 未播放时返回 null
@@ -192,10 +202,21 @@ public  static boolean isAlive()
 
 ### 禁用方式
 
-`JoyStick` 新增 `setEnabled(boolean)`：
+`JoyStick` 新增 `setInputEnabled(boolean)`：
 
-- 忽略触摸（含内置地图的 `onPositionInfo` 拖动回调，否则用户仍能借此改位置）
+- 忽略输入（移动、内置地图与历史列表触发的 `onPositionInfo`、以及窗口拖动）
 - 整体 `alpha` 降到 ~0.4
+
+**刻意不叫 `setEnabled`。** `JoyStick extends View`，`View.setEnabled(boolean)` 已存在且语义不同（它还牵动框架的 clickable/drawable 状态刷新）。覆写框架方法会让人误以为调用的是 `View` 的那一个，是容易看错的一处。
+
+**禁用在两层落实：**
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| 权威层 | `ServiceGo` 的两个 listener 回调（`onMoveInfo` / `onPositionInfo`）开头各加 `if (mRoutePlayer != null) return;` | 无论输入从摇杆哪个子视图来都拦得住，绕不过去 |
+| 界面层 | `JoyStick.setInputEnabled` + `processDirection` / 两处 `onPositionInfo` 调用点 / `JoyStickOnTouchListener` 的守卫 | 让「禁用」在观感和手感上都成立，而不是默默无反应 |
+
+只做界面层不够——摇杆有三个子窗口（摇杆 / 地图 / 历史），入口分散；只做权威层则会得到一个「能拖、能点、就是位置不动」的摇杆，比明确灰掉更糟。
 
 **降透明是必须的，不是打磨项。** 本项目已经吃过一次这个亏——终审 Ruling UI-4：一个 `setEnabled(false)` 但外观不变的按钮，用户看到能点却没反应，判定为回归。一个看起来正常、拖了没反应的摇杆是同一个错误。
 
@@ -287,6 +308,7 @@ isMockServStart = ServiceGo.isAlive();
 - 档位三选一，复用 `setting_walk`(1.2) / `setting_run`(3.6) / `setting_bike`(10.0) m/s，与摇杆同一套数字
 - **档位在开始前选，播放中改也允许**（改的是同一个字段，下一帧生效）
 - 主按钮二态：未播放时「开始模拟」，播放中「结束路线」
+- 状态条在闭合路线播放中写成「第 N 圈 · 本圈 200m / 2.1km」——`getLapCount()` 见上文；开环路线不显示圈数
 
 ### 进度显示用轮询，不用回调注册
 
@@ -313,6 +335,8 @@ isMockServStart = ServiceGo.isAlive();
 - `app/src/main/java/com/iterlocus/pathway/RouteProgress.java` — 状态快照
 - `app/src/test/java/com/iterlocus/pathway/RoutePlayerTest.java` — 单元测试
 - `app/src/main/res/layout/route_sim_route_item.xml` — 路线列表行
+- `app/src/main/res/drawable/bg_route_row.xml` — 列表行选中态背景（键 `state_activated`）
+- `app/src/main/res/color/route_row_text.xml` — 列表行文字色（键 `state_activated`）
 
 **修改**
 
@@ -325,10 +349,22 @@ isMockServStart = ServiceGo.isAlive();
 - `app/src/main/res/menu/menu_nav.xml` — 侧滑新增 `nav_route_sim`（挨着「绘制路线」）
 - `app/src/main/res/values/strings.xml` — 新增文案，`app_*` 前缀
 
-**复用**（不新增）
+**复用**
 
-- 列表选中态背景复用界面改版做的 `bg_tool_chip_toggle`；文字色复用 `res/color/chip_text_toggle`
-- 档位片复用 `bg_tool_chip`
+- 档位三选一复用界面改版确立的模式：`RadioGroup` + `RadioButton` 配 `android:button="@null"`，背景 `bg_tool_chip_toggle`、文字色 `res/color/chip_text_toggle`。绘制界面的模式选择就是这么做的，观感一致
+
+**新增的选中态资源（原计划复用，复核后不可行）**
+
+列表行的选中态**不能**复用 `bg_tool_chip_toggle`：那个 selector 的键是 `state_checked`，只有 `Checkable`（`RadioButton` / `CheckBox` / `CheckedTextView`）会置上；而 `ListView` 的行是普通 `LinearLayout`，`setItemChecked` 对它调的是 `setActivated`，置的是 `state_activated`——键对不上，选中不会有任何视觉变化。
+
+因此新增：
+
+- `app/src/main/res/drawable/bg_route_row.xml` — 键 `state_activated`：选中为主题色实底，未选中半透明白，圆角与描边沿用悬浮片的语言
+- `app/src/main/res/color/route_row_text.xml` — 键 `state_activated`：选中白字，未选中深色
+
+`View.setActivated` 会经 `ViewGroup.dispatchSetActivated` **传播到子视图**，所以行内两个 `TextView` 用同一个文字色 selector 就能跟着变，不需要在 `getView` 里手动逐个设色。
+
+配色与 `bg_tool_chip_toggle` / `chip_text_toggle` 保持一致（选中 = 主题色实底 + 白字，4.54:1 过 WCAG AA）。
 
 **注册与启动模式**：`RouteSimulationActivity` 已在 manifest 中注册。它承载 NFC 前台调度，**必须保持默认启动模式**（`nfc` 模块 README 明确要求接收标签的 Activity 不能是 `singleInstance`）。`MainActivity` 是 `singleInstance`，别照抄。
 
@@ -364,6 +400,7 @@ isMockServStart = ServiceGo.isAlive();
 - 闭合回绕：走到总长之后回到起点继续，且永不 `isFinished`
 - 开环终点：到达总长后 `isFinished()` 为 true，位置停在末点
 - 越界夹紧：`advance` 传入超过剩余距离的值不会跑过头
+- 圈数计数：闭合路线每绕完一圈 `getLapCount()` 加一；开环路线恒为 0；单次 `advance` 跨过一整圈以上时计数正确
 - 航向：正东 / 正北 / 正南等基本方向的取值
 - `dt` 为 0、速度为 0 时不移动
 - 单点 / 空列表：构造不抛，`getTotalDistance()` 为 0
