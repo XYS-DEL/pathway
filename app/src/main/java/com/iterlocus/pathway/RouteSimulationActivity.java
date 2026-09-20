@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.database.sqlite.SQLiteDatabase;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -57,7 +58,8 @@ import java.util.List;
  * 画线与框相机（百度地图原生就是 BD09）；{@link RouteRow#wgsPoints} 是喂给
  * {@link ServiceGo.ServiceGoBinder#startRoute} 的 WGS84。两边都不再做任何换算。
  *
- * <p>本界面<b>不解析 NFC 卡片</b>，只把收到的东西原样列出来供核对。
+ * <p>本界面<b>不解析 NFC 卡片</b>：URL 只用来在模拟开起来之后做一次外部跳转，包名与 source
+ * 只原样列出来供核对。从 URL 里取坐标仍是后续工作。
  */
 public class RouteSimulationActivity extends BaseActivity {
 
@@ -719,7 +721,43 @@ public class RouteSimulationActivity extends BaseActivity {
         if (GoUtils.isWifiEnabled(this)) {
             GoUtils.showDisableWifiDialog(this);
         }
+
+        // 卡片带了链接就跳过去。**放在最后、且只在真的开起来之后**：URL 打不开时模拟
+        // 已经跑起来了，那正是有用的结果，所以下面失败只提示、不回滚。
+        // 顺序也是刻意的：先把 WiFi 那条警告挂上，用户从目标 App 回来时还看得见它。
+        openCardUrl();
+
         refreshProgress();
+    }
+
+    /*===== 跳到卡片上的链接 =====*/
+
+    /**
+     * 打开 NFC 卡片上的 URL，没有就什么都不做。
+     *
+     * <p>从侧滑菜单进来时 {@code EXTRA_CARD_URL} 是空的，走纯模拟路径，行为与从前一致；
+     * 只有卡片带了链接才跳。卡片上另外两个字段（包名 / source）不参与跳转，只供显示。
+     *
+     * <p>这只是普通的外部跳转（{@code ACTION_VIEW}）。{@code :nfc} 模块里的
+     * {@code NfcSender} 是伪造贴卡广播（{@code ACTION_NDEF_DISCOVERED} + {@code setPackage}），
+     * 本项目明确不使用，这里与它无关，也不要接。
+     *
+     * <p>失败（没有能处理这个 URL 的 App、格式不对）只记日志加提示，**不回滚已经开始的
+     * 模拟**：那才是有用的结果。
+     */
+    private void openCardUrl() {
+        String url = getIntent().getStringExtra(EXTRA_CARD_URL);
+        if (isEmpty(url)) {
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception e) {
+            // Uri.parse 本身不抛，失败发生在 startActivity 找不到接收方时
+            // （ActivityNotFoundException 等）。按项目约定记日志后降级。
+            XLog.e("ROUTE_SIM: ERROR - openCardUrl");
+            GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_open_url_failed));
+        }
     }
 
     private void stopSimulation() {

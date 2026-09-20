@@ -204,6 +204,14 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
   `JoyStick.setInputEnabled` 加它自己四个入口（方向收口 `processDirection`、窗口拖拽的 `onTouch`、内置地图
   落点、历史列表选点）的守卫，是让「禁用」在观感上成立。界面层入口分散，单靠它拦不干净；单靠服务层则是
   一个看得见、拖得动却毫无反应的控件。
+- **播放期间整个悬浮窗收起（`mJoyStick.hide()`），不只是变淡。** 原先只把 alpha 降到 0.4，仍然占着屏幕，
+  用户抱怨它挡在目标 App 上面。可见性由 `ServiceGo.mJoyStickDesiredVisible` 记住——它是**用户的意愿**，
+  播放期间不变、只是被临时压住，播放结束 / 到达时按它恢复，所以事先用通知栏关掉摇杆的人不会被「开始模拟」
+  强行弹回来；反过来，用户在播放期间显式点了「显示摇杆」也改写这个字段，否则播放一结束又会被按旧意愿收
+  回去、刚叫出来的摇杆又没了。**上面那两层的「禁用」照旧保留**：通知栏的「显示摇杆」随时能把摇杆叫出来，
+  那时它必须呈现为变灰且拖不动（`JoyStick.show()` 自己会先 `applyInputEnabledVisual()`，所以中途叫出来的
+  那一个自然是灰的）。求值走 `refreshJoyStickVisibility()`，与 `refreshJoyStickInputEnabled()` 同一个
+  「投递出去、由任务自己重新求值」的模式。
 - **判据是 `isRoutePlaying()`（`player != null && !isFinished()`），不是 `mRoutePlayer != null`。**
   到达终点后路线**刻意不自动结束**（用户此刻「站」在终点，位置不再被推进），字面的 null 判断会留下一个
   全不透明、拖不动的摇杆。
@@ -223,6 +231,22 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
   grep 无命中）——**别因为看到「ListView 会自动置激活态」就省掉这行 `setActivated`**。键在 `state_checked`
   的 `bg_tool_chip_toggle` / `chip_text_toggle` **不能**复用到行上：状态键对不上是**静默失败**，编得过、
   lint 过，选中就是没有视觉变化。行用 `bg_route_row` / `route_row_text`。
+- **界面是「地图 + 可折叠面板」上下分栏**：上面 `MapView` 画出选中那条路线的 `Polyline` 和当前位置的
+  `Marker`，下面是控制面板；面板可折叠，折叠后只剩把手那一行，**状态文本钉在把手上**，所以播放中收起也
+  还看得见进度。折叠态与选中行一起进 `onSaveInstanceState`，跨旋转保持（本界面**没有**锁竖屏）。
+  `MapView` 完整转发 `onResume` / `onPause` / `onDestroy`，顺序与 `RouteDrawActivity` 一致。
+- **两份点集各用各的，都不要再加换算。** `RouteConfig.getPoints()` 是 **BD09**，只用来画线、框相机
+  （百度地图原生就是 BD09），闭合路线要把首点补到末尾才画得出回程那一段；喂给 `startRoute()` 的是
+  `RouteRow.wgsPoints`（WGS84）。当前位置标记挂在**既有的 500ms 轮询**里（不新增定时器），位置来自
+  `ServiceGoBinder.getCurrentPosition()`（WGS84），画到地图前走一次 `MapUtils.wgs2bd09`——
+  这是本界面唯一一处坐标换算。**相机只在选中路线时框一次，轮询里绝不动**，否则用户没法自己拖地图；
+  所有点重合时 `LatLngBounds` 退化成一点，改用一个固定近景级别。选路线是 `AlertDialog` +
+  `setAdapter(mAdapter, …)`，弹窗里的行与列表**是同一份渲染**，没有第二套。
+- **点「开始模拟」时若卡片带了 URL，成功开启路线之后再跳过去**（`ACTION_VIEW`，包在 try/catch 里，
+  失败记 `XLog.e` 并提示）。**顺序是刻意的、失败不回滚**：URL 打不开（格式不对、没有能处理它的 App）时
+  模拟**已经跑起来了**，那才是有用的结果。没有卡片信息（从侧滑菜单进来）就走原来的纯模拟路径。
+  这里只是普通的外部跳转，**与 `:nfc` 模块的 `NfcSender` 无关**——后者构造
+  `ACTION_NDEF_DISCOVERED` 并 `setPackage`，是本项目明确禁止的能力，不要接。
 - **`bindService` 配 `BIND_AUTO_CREATE` 会创建服务**，而 `ServiceGo.onCreate` 会装 test provider 并起前台
   通知——光打开模拟界面就把模拟位置服务启动了，显然不是用户要的。所以界面只在 `ServiceGo.isAlive()` 时才在
   `onResume` 里绑定；服务没活着就不可能有路线在跑。`startSimulation()` 则无条件 `startForegroundService`，
@@ -255,7 +279,7 @@ arm64-v8a）：行选中态的观感、速度档位片、空态与禁用态、�
 
 `:nfc` 是独立的 Gradle 库模块（`com.android.library`，namespace `com.acooldog.nfc`），零第三方依赖、无资源、无 manifest 声明，设计目标是可整体复制到别的工程。它提供读卡（`NfcReaderSession`）、伪造贴卡派发（`NfcSender`）、配置持久化（`NfcConfigStore`）。
 
-`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`——那个界面已经做完了选路线、档位与开始 / 结束模拟（见「路线模拟」一节），但它**不解析这三个值**，只原样显示供核对；解析坐标仍是后续工作。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
+`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`——那个界面已经做完了选路线、档位与开始 / 结束模拟（见「路线模拟」一节），但它**不解析这三个值**——URL 只在模拟开起来之后做一次外部跳转，包名与 source 只原样显示供核对；从 URL 里解析坐标仍是后续工作。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
 
 两条硬约束：
 

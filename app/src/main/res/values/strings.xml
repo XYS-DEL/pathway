@@ -210,6 +210,7 @@
     <string name="route_sim_panel_expand">展开面板</string>
     <string name="route_sim_arrow_collapse">▾</string>
     <string name="route_sim_arrow_expand">▴</string>
+    <string name="route_sim_open_url_failed">模拟已开始，但打不开卡片上的链接</string>
     <!-- 绘制路线 -->
     <string name="app_route_draw">绘制路线</string>
     <string name="nav_menu_route_draw">绘制路线</string>
