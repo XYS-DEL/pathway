@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 根布局必须有底色，否则本屏的芯片会消失。
+<!-- 上下分栏：上面地图（weight 1），下面控制面板；面板可折叠，折叠后只剩把手那一行。
+     折叠后状态文本仍然可见——它钉在把手上，播放中收起面板也还看得见进度。
+
+     根布局必须有底色，否则本屏的芯片会消失。
      速度档位与「开始模拟」用的是一套「半透明白填充 + 白描边」的悬浮片语言，那套语言是压在地图上
-     设计的（绘制界面）。本屏没有地图，窗口底是主题的 #FAFAFA，白片压上去之后：
+     设计的（绘制界面）。本屏面板底若是主题的 #FAFAFA，白片压上去之后：
        未选中填充 #E0FFFFFF(α.878) → 254/255，与底色只差 4/255
        未选中描边 #59FFFFFF(α.349) → 253/255，差 2/255
        选中态填充是主题色实底，反而是唯一看得见的一个
@@ -19,128 +22,172 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp"
     android:background="#E0E0E0"
+    android:orientation="vertical"
     tools:ignore="Overdraw">
 
-    <TextView
-        android:id="@+id/route_sim_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/route_sim_status_idle"
-        android:textSize="16sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="@string/route_sim_list_title"
-        android:textSize="14sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/route_sim_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/route_sim_empty"
-        android:textSize="14sp"
-        android:visibility="gone" />
-
-    <ListView
-        android:id="@+id/route_sim_list"
+    <!-- 地图：选中路线画成折线、当前位置一个标记。手势保持默认可用——
+         本屏没有绘制，不与任何手势冲突。 -->
+    <com.baidu.mapapi.map.MapView
+        android:id="@+id/route_sim_map"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        android:layout_weight="1"
-        android:divider="@null"
-        android:dividerHeight="8dp" />
+        android:layout_weight="1" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- 把手：常驻，折叠后只剩它。整行可点，展开/收起。
+             它用 bg_tool_chip 这一块悬浮片，与其余片同一套语言。 -->
+        <LinearLayout
+            android:id="@+id/route_sim_handle"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/route_sim_speed_label"
-            android:textSize="14sp" />
+            android:background="@drawable/bg_tool_chip"
+            android:clickable="true"
+            android:elevation="4dp"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="10dp">
 
-        <RadioGroup
-            android:id="@+id/route_sim_speed_group"
-            android:layout_width="wrap_content"
+            <TextView
+                android:id="@+id/route_sim_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/route_sim_status_idle"
+                android:textColor="@color/chip_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/route_sim_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/route_sim_panel_collapse"
+                android:gravity="center"
+                android:minWidth="44dp"
+                android:text="@string/route_sim_arrow_collapse"
+                android:textColor="@color/chip_text"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 折叠时整体 GONE。选中路线改成弹窗，这里只留一个按钮。 -->
+        <LinearLayout
+            android:id="@+id/route_sim_body"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:orientation="horizontal">
+            android:orientation="vertical">
 
-            <RadioButton
-                android:id="@+id/route_sim_speed_walk"
+            <TextView
+                android:id="@+id/route_sim_pick"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_tool_chip_toggle"
-                android:button="@null"
-                android:checked="true"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_tool_chip"
+                android:clickable="true"
                 android:elevation="4dp"
+                android:ellipsize="end"
+                android:focusable="true"
+                android:maxLines="1"
                 android:paddingHorizontal="14dp"
-                android:paddingVertical="8dp"
-                android:text="@string/route_sim_speed_walk"
-                android:textColor="@color/chip_text_toggle" />
+                android:paddingVertical="10dp"
+                android:text="@string/route_sim_list_title"
+                android:textColor="@color/chip_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
 
-            <RadioButton
-                android:id="@+id/route_sim_speed_run"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_tool_chip_toggle"
-                android:button="@null"
-                android:elevation="4dp"
-                android:paddingHorizontal="14dp"
-                android:paddingVertical="8dp"
-                android:text="@string/route_sim_speed_run"
-                android:textColor="@color/chip_text_toggle" />
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-            <RadioButton
-                android:id="@+id/route_sim_speed_bike"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_tool_chip_toggle"
-                android:button="@null"
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/route_sim_speed_label"
+                    android:textSize="14sp" />
+
+                <RadioGroup
+                    android:id="@+id/route_sim_speed_group"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/route_sim_speed_walk"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_tool_chip_toggle"
+                        android:button="@null"
+                        android:checked="true"
+                        android:elevation="4dp"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="8dp"
+                        android:text="@string/route_sim_speed_walk"
+                        android:textColor="@color/chip_text_toggle" />
+
+                    <RadioButton
+                        android:id="@+id/route_sim_speed_run"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_tool_chip_toggle"
+                        android:button="@null"
+                        android:elevation="4dp"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="8dp"
+                        android:text="@string/route_sim_speed_run"
+                        android:textColor="@color/chip_text_toggle" />
+
+                    <RadioButton
+                        android:id="@+id/route_sim_speed_bike"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_tool_chip_toggle"
+                        android:button="@null"
+                        android:elevation="4dp"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="8dp"
+                        android:text="@string/route_sim_speed_bike"
+                        android:textColor="@color/chip_text_toggle" />
+                </RadioGroup>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/route_sim_primary"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_tool_chip_accent"
+                android:clickable="true"
                 android:elevation="4dp"
-                android:paddingHorizontal="14dp"
-                android:paddingVertical="8dp"
-                android:text="@string/route_sim_speed_bike"
-                android:textColor="@color/chip_text_toggle" />
-        </RadioGroup>
+                android:focusable="true"
+                android:gravity="center"
+                android:text="@string/route_sim_start"
+                android:textColor="@color/chip_text_accent"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/route_sim_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:maxLines="6"
+                android:textIsSelectable="true"
+                android:textSize="12sp" />
+        </LinearLayout>
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/route_sim_primary"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/bg_tool_chip_accent"
-        android:clickable="true"
-        android:elevation="4dp"
-        android:focusable="true"
-        android:gravity="center"
-        android:text="@string/route_sim_start"
-        android:textColor="@color/chip_text_accent"
-        android:textSize="16sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/route_sim_content"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:maxLines="6"
-        android:textIsSelectable="true"
-        android:textSize="12sp" />
 
 </LinearLayout>

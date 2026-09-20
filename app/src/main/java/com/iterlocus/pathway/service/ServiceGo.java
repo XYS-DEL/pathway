@@ -80,6 +80,16 @@ public class ServiceGo extends Service {
     // 摇杆相关
     private JoyStick mJoyStick;
 
+    /**
+     * 用户希望的摇杆可见性，初值为 true（{@link #initJoyStick()} 起来就 {@code show()}）。
+     *
+     * <p>播放期间这个字段<b>不变</b>，只是被临时压住——播放结束 / 到达时按它恢复。
+     * 通知栏有「隐藏摇杆」，用户可能本来就把它关了；结束时<b>不许</b>强行弹回来。
+     * 反过来，用户在播放期间显式点了「显示摇杆」，那也是他的意愿，要记下来，
+     * 否则播放一结束又会被按旧意愿收回去。
+     */
+    private volatile boolean mJoyStickDesiredVisible = true;
+
     /** 当前路线。null 表示没有路线在跑。定位线程读、UI 线程写，故 volatile。 */
     private volatile RoutePlayer mRoutePlayer;
     private volatile String mRouteName;
@@ -190,9 +200,14 @@ public class ServiceGo extends Service {
         //准备intent
         Intent clickIntent = new Intent(this, MainActivity.class);
         PendingIntent clickPI = PendingIntent.getActivity(this, 1, clickIntent, PendingIntent.FLAG_IMMUTABLE);
+        // setPackage：把通知栏里这几个广播都收成「只发给本包」。不设的话它们是隐式广播，
+        // 本 App 自己发出去的同名广播也会被别的 App 注册的 receiver 收走。
+        // 注意这**只约束发送侧**——见下面 onReceive 处关于收信侧的说明。
         Intent showIntent = new Intent(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW);
+        showIntent.setPackage(getPackageName());
         PendingIntent showPendingPI = PendingIntent.getBroadcast(this, 0, showIntent, PendingIntent.FLAG_IMMUTABLE);
         Intent hideIntent = new Intent(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE);
+        hideIntent.setPackage(getPackageName());
         PendingIntent hidePendingPI = PendingIntent.getBroadcast(this, 0, hideIntent, PendingIntent.FLAG_IMMUTABLE);
 
         // mRoutePlayer 是 volatile，读一次进局部：正文文案与动作列表取自同一个快照，
@@ -218,6 +233,9 @@ public class ServiceGo extends Service {
 
         if (player != null) {
             Intent stopIntent = new Intent(SERVICE_GO_NOTE_ACTION_ROUTE_STOP);
+            // 与上面两个同样收成只发给本包。这一个尤其不能漏：伪造的 StopRoute 能直接停掉
+            // 正在跑的路线，比伪造摇杆可见性更糟——而它原先恰恰是唯一没设 setPackage 的。
+            stopIntent.setPackage(getPackageName());
             // 请求码与上面两个错开；即便 action 已经不同，也别复用同一个码
             PendingIntent stopPendingPI = PendingIntent.getBroadcast(this, 3, stopIntent, PendingIntent.FLAG_IMMUTABLE);
             builder.addAction(new NotificationCompat.Action(null,
@@ -319,6 +337,51 @@ public class ServiceGo extends Service {
     }
 
     /**
+     * 按「是否在播放」与「用户希望的可见性」求值后落到 {@link JoyStick} 上。
+     *
+     * <p>播放期间<b>整个悬浮窗收起来</b>：用户抱怨它挡在目标 App 上面。只把 alpha 降到
+     * 0.4 是不够的——那只是变淡，仍然占着屏幕。
+     *
+     * <p>「禁用」那一层（{@link #refreshJoyStickInputEnabled()} 与
+     * {@code JoyStick.setInputEnabled}）因此<b>保留不删</b>：通知栏的「显示摇杆」随时
+     * 能把摇杆叫出来，那时它必须呈现为变灰且拖不动，而不是不透明却拖不动。
+     * {@code JoyStick.show()} 自己会先调 {@code applyInputEnabledVisual()}，
+     * 所以中途叫出来的那一个自然是灰的，这里不必再补一次。
+     *
+     * <p>与 {@link #refreshJoyStickInputEnabled()} 同一个模式：投递出去、由任务自己
+     * 重新求值，所以即使投递被主线程的 {@code startRoute()} 插到中间，后到的那次
+     * 也会算出对新路线正确的状态。
+     *
+     * <p>{@code isStop} 守卫：{@code onDestroy} 打断不了一个已经投递出去的任务，而那时
+     * {@code mJoyStick.destroy()} 已经摘掉窗口、{@code mMapView} 也 {@code onDestroy} 了。
+     * 少了这道守卫，这里会把窗口重新 {@code addView} 回来（一个杀不掉的悬浮窗），
+     * 或者在 {@code WINDOW_TYPE_MAP} 模式下碰已经销毁的 MapView 而抛出。这个守卫在这里
+     * 是**可靠**的：本任务跑在主线程上，而 {@code isStop} 正是主线程写的。
+     * 整体也护住——{@code show()} 没有自己的 try/catch，异常逃出去是未捕获崩溃。
+     *
+     * <p>另外两个碰 {@code mJoyStick} 的投递不需要这道守卫：{@code setCurrentPosition}
+     * 自带 try/catch（记日志后降级），{@code setInputEnabled} 只改 alpha。
+     */
+    private void refreshJoyStickVisibility() {
+        postToMain(() -> {
+            try {
+                if (isStop || mJoyStick == null) {
+                    return;
+                }
+                if (isRoutePlaying()) {
+                    mJoyStick.hide();
+                } else if (mJoyStickDesiredVisible) {
+                    mJoyStick.show();
+                } else {
+                    mJoyStick.hide();
+                }
+            } catch (Exception e) {
+                XLog.e("SERVICEGO: ERROR - refreshJoyStickVisibility");
+            }
+        });
+    }
+
+    /**
      * 到达终点：位置停在末点、速度与航向归零，摇杆交还用户，通知改文案。
      *
      * <p>运行在定位线程上，三件事全部走 {@link #postToMain}；而且它们都在**执行时**
@@ -335,6 +398,7 @@ public class ServiceGo extends Service {
         mCurBea = DEFAULT_BEA;
         syncJoyStickToCurrentPosition();
         refreshJoyStickInputEnabled();
+        refreshJoyStickVisibility();
         updateNotification();
     }
 
@@ -555,13 +619,42 @@ public class ServiceGo extends Service {
     public class NoteActionReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
+            // 收信侧**仍然是不设防的**，别被上面那句 setPackage 误导成已经安全了：
+            // 本 receiver 是动态注册的，既没给 permission 也没带 RECEIVER_NOT_EXPORTED，
+            // 所以任何 App 都能给本 App 发这三个 action——伪造的 StopRoute 能直接停掉正在跑的
+            // 路线，伪造的 Show/HideJoyStick 会改写 mJoyStickDesiredVisible（用户的可见性意愿）。
+            // 这是既有问题（本次只把它放大了）。
+            //
+            // 今天（compileSdk 32）**没有可用的公开 API 去核对发送方**。收口的办法有三条，
+            // 前两条要抬 compileSdk，第三条不用：
+            //   1) BroadcastReceiver.getSentFromUid() 比对 Process.myUid()——平台自己的
+            //      api-versions.xml 标着 **since API 34**。注意它的 javadoc：receiver 拿不到发送方
+            //      身份时返回 Process.INVALID_UID，那种情况怎么判要单独定（现在用不了，不用急）。
+            //   2) Context.RECEIVER_NOT_EXPORTED（最干净，但 **API 33** 才有）。
+            //   3) 给 registerReceiver 传接收方权限（**API 1 就有，这条不用抬 compileSdk**），
+            //      但必须先实测确认 PendingIntent.getBroadcast 发出的广播带着本 App 的身份、
+            //      过得了这道权限——否则是把一个低危漏洞换成一个静默失效的通知按钮，
+            //      而这件事读文档定不了。
+            // **不要用 BroadcastReceiver.getSendingUid()**：android-32 与 android-36 的 android.jar
+            // 逐类搜过，它**根本不存在**；android-36.1 的 sources 连 @hide 成员都带，里面也没有它。
+            // 网上有文章引它，引了编不过。
+            //
+            // 同类还有一处：MainActivity.mDownloadBdRcv（同样动态注册、无权限、无 export flag）。
+            // 但它的 action 是平台的 android.intent.action.DOWNLOAD_COMPLETE，是否属于平台
+            // protected broadcast（那样就只有系统能发）**我没能核实**，所以两者「形状同类」，
+            // 「可利用性」这一处存疑。收干净时一起做。
             String action = intent.getAction();
             if (action != null) {
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW)) {
+                    // 播放期间也照样显示：这是用户的显式要求（他要看摇杆内置地图上的当前位置），
+                    // 只是那时摇杆是灰的、拖不动。同时把意愿记下来，否则播放一结束，
+                    // 恢复逻辑会按旧意愿把它收回去，用户刚叫出来的摇杆又没了。
+                    mJoyStickDesiredVisible = true;
                     mJoyStick.show();
                 }
 
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE)) {
+                    mJoyStickDesiredVisible = false;
                     mJoyStick.hide();
                 }
 
@@ -589,6 +682,33 @@ public class ServiceGo extends Service {
             mCurAlt = alt;
             mLocHandler.sendEmptyMessage(HANDLER_MSG_ID);
             mJoyStick.setCurrentPosition(mCurLng, mCurLat, mCurAlt);
+        }
+
+        /**
+         * 当前被模拟的位置，{@code {经度, 纬度}}，<b>WGS84</b>。
+         *
+         * <p>模拟界面的地图要标出「现在人在哪」，而进度快照
+         * （{@link RouteProgress}）里只有里程、没有位置，所以单开这一个只读口子。
+         *
+         * <p><b>这不是一次自洽的快照。</b> 三个字段虽然都是 volatile，但经纬度是两条语句分开
+         * 写（{@code mCurLng = position[0]; mCurLat = position[1];}）、这里也是两次独立的
+         * volatile 读，两次读之间可以跨过一次 tick，于是可能混到两个位置：经度取自这一帧、
+         * 纬度取自下一帧。
+         *
+         * <p>误差上界就是「一个 tick 走的距离」——定位循环约 10Hz（{@code Thread.sleep(100)}），
+         * 按三档速度（1.2 / 3.6 / 10.0 m/s）算约 0.12 / 0.36 / 1.0 米。步行那档不足 0.15 米，
+         * 标在地图上肉眼看不出来，但这只是「量小」，不是「原子」。要真的原子，得把两个值并进
+         * 一个不可变对象一起发布（或让读取方拿一次快照对象），本次没做。
+         *
+         * <p><b>那个界只对定位循环这个写者成立。</b> 同一对字段还有第二个写者
+         * {@link ServiceGoBinder#setPosition(double, double, double)}（瞬移），它一次可以移动任意远，
+         * 所以**跨过一次瞬移的读不受「一个 tick」约束**。这不是缺陷（瞬移本来就该跳很远），
+         * 只是别把这个界当成对所有情况都成立。
+         *
+         * <p>不做任何换算——调用方要画到百度地图上，自己走 {@code MapUtils.wgs2bd09}。
+         */
+        public double[] getCurrentPosition() {
+            return new double[]{mCurLng, mCurLat};
         }
 
         /**
@@ -631,8 +751,10 @@ public class ServiceGo extends Service {
             mRoutePlayer = player;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
             mLastTickMs = SystemClock.elapsedRealtime();
-            // 表现层：摇杆禁用并变灰、内置地图跳到路线起点、通知换成「正在模拟路线」
+            // 表现层：整个悬浮窗收起（用户抱怨它挡在目标 App 上）、摇杆禁用并变灰、
+            // 内置地图跳到路线起点、通知换成「正在模拟路线」
             refreshJoyStickInputEnabled();
+            refreshJoyStickVisibility();
             syncJoyStickToCurrentPosition();
             updateNotification();
             return true;
@@ -654,9 +776,10 @@ public class ServiceGo extends Service {
             // 即便有值也是噪声，0 是最不容易被读成异常的那个取值。
             mSpeed = 0d;
             mCurBea = DEFAULT_BEA;
-            // 表现层：摇杆交还用户、通知退回「服务正在运行中」。
-            // 放在置 null 之后——两者都在执行时重读 mRoutePlayer
+            // 表现层：摇杆按用户意愿回到屏幕上（播放前关掉的就保持关着）、通知退回
+            // 「服务正在运行中」。放在置 null 之后——两者都在执行时重读 mRoutePlayer
             refreshJoyStickInputEnabled();
+            refreshJoyStickVisibility();
             updateNotification();
             syncJoyStickToCurrentPosition();
         }
