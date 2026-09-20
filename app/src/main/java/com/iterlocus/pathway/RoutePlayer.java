@@ -12,6 +12,13 @@ package com.iterlocus.pathway;
  *
  * <p>位置沿折线按弧长推进，段内经纬度线性插值——几百米尺度下误差远小于 1cm，
  * 而用户画出来的本来就是折线，不做曲线平滑。
+ *
+ * <p><b>本类会被多个线程访问。</b>定位线程在 {@link #advance(double)} 里推进，
+ * 主线程读快照（{@link #isFinished()} / {@code getDistanceCovered()}）并经
+ * {@link #setSpeed(double)} 改速度。因此 {@code mDistance}、{@code mSpeed}、
+ * {@code mLapCount} 三个字段是 {@code volatile}——注意光是让持有本对象的那个字段
+ * 变成 volatile 并不能覆盖它们，发布发生在这些写之后。其余状态（{@code mSegment}、
+ * 构造期定下的数组与总长）仍只由单一线程触碰，不加。
  */
 public final class RoutePlayer {
 
@@ -22,9 +29,12 @@ public final class RoutePlayer {
     private final double[] mCumulative;
     private final double mTotalDistance;
 
-    private double mSpeed;
-    private double mDistance;
-    private int mLapCount;
+    /** 主线程写（setRouteSpeed）、定位线程读（advance），故 volatile。 */
+    private volatile double mSpeed;
+    /** 定位线程写（advance）、主线程读（isRoutePlaying 里的 isFinished()），故 volatile。 */
+    private volatile double mDistance;
+    /** 定位线程写（advance）、主线程读（getLapCount），故 volatile。 */
+    private volatile int mLapCount;
     /** 单调前进的游标：当前位置落在第几段。弧长只增不减，不需要二分查找。 */
     private int mSegment;
 

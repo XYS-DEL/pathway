@@ -211,22 +211,34 @@ public class ServiceGo extends Service {
     }
 
     /**
-     * 刷新前台通知。播放状态一变就调。{@code notify} 线程安全，定位线程可直接调。
+     * 刷新前台通知。
+     *
+     * <p>一律经主线程串行化，且文案在**执行时**才成型（{@code buildNotification()} 现场读
+     * {@code mRoutePlayer}）——这样后到的那次自然算出正确文案，不会出现「已到达」的通知
+     * 盖在已经结束的路线之上。
+     *
+     * <p>{@code isStop} 守卫：{@code onDestroy} 打断不了一个已经在 {@code advanceRoute}
+     * 里的 tick，那个 tick 走到这里会把通知重新贴到 {@code stopForeground} 之后。
      *
      * <p>整体护住：本方法的调用点里，`stopRoute()` 那一路在主线程上、由点击派发器
      * （`doGoLocation` → `setPosition`）可达，异常逃出去是未捕获崩溃。按项目约定
-     * 记日志后降级为「通知没刷新」。构造本身在 {@code onCreate} 里没护（通知坏掉会
-     * 在启动时当场暴露），所以这里吞掉不会掩盖通知格式本身的缺陷。
+     * 记日志后降级为「通知没刷新」。构造本身在 {@code onCreate} 里没护（{@code startForeground}
+     * 那次不投递、同步执行，通知坏掉会在启动时当场暴露），所以这里吞掉不掩盖格式缺陷。
      */
     private void updateNotification() {
-        try {
-            NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (manager != null) {
-                manager.notify(SERVICE_GO_NOTE_ID, buildNotification());
+        postToMain(() -> {
+            try {
+                if (isStop) {
+                    return;
+                }
+                NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                if (manager != null) {
+                    manager.notify(SERVICE_GO_NOTE_ID, buildNotification());
+                }
+            } catch (Exception e) {
+                XLog.e("SERVICEGO: ERROR - updateNotification");
             }
-        } catch (Exception e) {
-            XLog.e("SERVICEGO: ERROR - updateNotification");
-        }
+        });
     }
 
     private void initJoyStick() {
@@ -274,12 +286,17 @@ public class ServiceGo extends Service {
         return player != null && !player.isFinished();
     }
 
-    /** 开关摇杆输入。{@code JoyStick} 是 View，只能在主线程碰。 */
-    private void setJoyStickInputEnabled(boolean enabled) {
-        final boolean value = enabled;
+    /**
+     * 把摇杆的输入开关刷成当前该有的样子。{@code JoyStick} 是 View，只能在主线程碰。
+     *
+     * <p>刻意不接收一个算好的布尔值：调用点算出的值可能已经过期——定位线程算出
+     * 「该恢复」的同时，主线程可能刚好开了一条新路线。让投递出去的任务自己重新求值，
+     * 后到的那次自然算出正确结果，顺序就不再重要。
+     */
+    private void refreshJoyStickInputEnabled() {
         postToMain(() -> {
             if (mJoyStick != null) {
-                mJoyStick.setInputEnabled(value);
+                mJoyStick.setInputEnabled(!isRoutePlaying());
             }
         });
     }
@@ -287,12 +304,13 @@ public class ServiceGo extends Service {
     /**
      * 到达终点：位置停在末点，摇杆交还用户，通知改文案。
      *
-     * <p>运行在定位线程上：摇杆那两下走 {@link #postToMain}。通知的
-     * {@code NotificationManager.notify} 本身线程安全，直接调。
+     * <p>运行在定位线程上，三件事全部走 {@link #postToMain}；而且它们都在**执行时**
+     * 重读 {@code mRoutePlayer}，所以即使这三次投递被主线程上的一次
+     * {@code startRoute()} 插到中间，后到的那次也会算出对新路线正确的状态。
      */
     private void onRouteFinished() {
         syncJoyStickToCurrentPosition();
-        setJoyStickInputEnabled(true);
+        refreshJoyStickInputEnabled();
         updateNotification();
     }
 
@@ -581,7 +599,7 @@ public class ServiceGo extends Service {
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
             mLastTickMs = SystemClock.elapsedRealtime();
             // 表现层：摇杆禁用并变灰、内置地图跳到路线起点、通知换成「正在模拟路线」
-            setJoyStickInputEnabled(false);
+            refreshJoyStickInputEnabled();
             syncJoyStickToCurrentPosition();
             updateNotification();
             return true;
@@ -595,8 +613,8 @@ public class ServiceGo extends Service {
             mRoutePlayer = null;
             mRouteName = null;
             // 表现层：摇杆交还用户、通知退回「服务正在运行中」。
-            // 放在置 null 之后——通知正文按 mRoutePlayer 是否为 null 决定
-            setJoyStickInputEnabled(true);
+            // 放在置 null 之后——两者都在执行时重读 mRoutePlayer
+            refreshJoyStickInputEnabled();
             updateNotification();
             syncJoyStickToCurrentPosition();
         }
