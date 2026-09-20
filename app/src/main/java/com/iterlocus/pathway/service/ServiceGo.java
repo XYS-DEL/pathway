@@ -617,12 +617,28 @@ public class ServiceGo extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             // 收信侧**仍然是不设防的**，别被上面那句 setPackage 误导成已经安全了：
-            // 本 receiver 是动态注册的，registerReceiver 既没给 permission 也没带
-            // RECEIVER_NOT_EXPORTED（那是 API 33 才有的常量，本项目 compileSdk 32 引不到），
+            // 本 receiver 是动态注册的，既没给 permission 也没带 RECEIVER_NOT_EXPORTED，
             // 所以任何 App 都能给本 App 发这三个 action——伪造的 StopRoute 能直接停掉正在跑的
             // 路线，伪造的 Show/HideJoyStick 会改写 mJoyStickDesiredVisible（用户的可见性意愿）。
-            // 这是既有问题（本次只把它放大了），要修得统一收口 receiver 的暴露面
-            // （升 compileSdk 后用 RECEIVER_NOT_EXPORTED，或给 receiver 加签名级权限），不在本次范围。
+            // 这是既有问题（本次只把它放大了）。
+            //
+            // 今天（compileSdk 32）没有可用的公开 API 去核对发送方，三条路都要先把 compileSdk 抬上去：
+            //   1) BroadcastReceiver.getSentFromUid() 比对 Process.myUid()——平台自己的
+            //      api-versions.xml 标着 **since API 34**。注意它的 javadoc：receiver 拿不到发送方
+            //      身份时返回 Process.INVALID_UID，那种情况怎么判要单独定（现在用不了，不用急）。
+            //   2) Context.RECEIVER_NOT_EXPORTED（最干净，但 **API 33** 才有）。
+            //   3) 给 registerReceiver 传接收方权限（**API 1 就有**，不用抬 compileSdk），
+            //      但必须先实测确认 PendingIntent.getBroadcast 发出的广播带着本 App 的身份、
+            //      过得了这道权限——否则是把一个低危漏洞换成一个静默失效的通知按钮，
+            //      而这件事读文档定不了。
+            // **不要用 BroadcastReceiver.getSendingUid()**：android-32 与 android-36 的 android.jar
+            // 逐类搜过，它**根本不存在**；android-36.1 的 sources 连 @hide 成员都带，里面也没有它。
+            // 网上有文章引它，引了编不过。
+            //
+            // 同类还有一处：MainActivity.mDownloadBdRcv（同样动态注册、无权限、无 export flag）。
+            // 但它的 action 是平台的 android.intent.action.DOWNLOAD_COMPLETE，是否属于平台
+            // protected broadcast（那样就只有系统能发）**我没能核实**，所以两者「形状同类」，
+            // 「可利用性」这一处存疑。收干净时一起做。
             String action = intent.getAction();
             if (action != null) {
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW)) {
