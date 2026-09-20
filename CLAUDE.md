@@ -299,6 +299,15 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
 `RouteSimulationActivity.mBound` 只在 `onServiceConnected` 里置 true，而 `bindService` 有两处发出点
 （`onResume` 与 `startSimulation` 的补发路径），连接没落地的那次绑定不会被 `unbindService` 释放。
 
+**另一处静默无操作（没修）**：卡片**有包名但没有 URL** 时，「开始模拟」会正常把路线跑起来，而发卡
+那一步直接返回——`sendCardPayload()`（`RouteSimulationActivity`）第一行就是 `if (isEmpty(mCardUrl))
+return;`，之后**不发卡、不跳转、不提示，也不记日志**。用户看到的是一次正常开始的模拟和一次什么都没
+发生的发卡。这个组合是可达的：读卡页的交接按钮判据是「URL **或**包名任一非空」
+（`NfcCardActivity` 的 `mSimulateBtn.setEnabled(!mUrl.isEmpty() || !mPackageName.isEmpty())`），
+所以只有 AAR 没有 URI 的标签就会踩到。**根因是两处判据不一致**：交接侧认为「有一个就能用」，
+发送侧要求「必须有 URL」，中间没有一步把它们对齐。修法要么补提示、要么把交接判据收紧到两者齐全，
+后者与「只要读到过非空内容就能交接」的设计取舍冲突，没做。
+
 **这个界面的观感由用户实机验收，代理不得自行判断。** `exported="false"`、本机没有 arm64 设备或模拟器
 镜像、APK 只有 arm64-v8a——代理既拉不起来也截不了图，布局与配色只能由用户跑真机后反馈。本项目已有一次
 同类教训（见上一节：纯读代码判定「顶多是一道浅缝」，截图是一大块白块）。本界面已由用户实机验收并据此
