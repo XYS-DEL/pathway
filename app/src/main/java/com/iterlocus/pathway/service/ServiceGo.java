@@ -56,7 +56,13 @@ public class ServiceGo extends Service {
     /** 单次推进的时间上限，秒。doze / GC 长暂停之后不夹住会一次跳出几百米。 */
     private static final double MAX_TICK_SECONDS = 1.0;
 
-    /** 服务存活标志，供 MainActivity 对账 isMockServStart。 */
+    /**
+     * 服务存活标志。唯一的消费者是 {@code RouteSimulationActivity}：它据此决定要不要
+     * {@code bindService}，免得 {@code BIND_AUTO_CREATE} 把一个已经死掉的服务凭空创建出来。
+     *
+     * <p>{@code MainActivity.isMockServStart} **没有**读它——那个字段的陈旧问题是已知缺陷，
+     * 见 CLAUDE.md 的「已知缺陷」一节，不要在这里声称本标志解决了它。
+     */
     private static volatile boolean sAlive = false;
 
     private LocationManager mLocManager;
@@ -590,9 +596,9 @@ public class ServiceGo extends Service {
                 return false;
             }
             // 逐行验形。RoutePlayer 的构造器直接下标取值，null 行或长度不足会抛
-            // NPE/AIOOBE；非有限值则会让下面第二条拒绝失效（NaN <= 0d 为 false），
-            // 于是被当成合法路线收下，最后表现为一个永远不结束、位置是 NaN 的模拟。
-            // 这是 binder 上的公开入口、数据来自别的组件，按项目约定必须记日志后降级而不是抛。
+            // NPE/AIOOBE；非有限值也在这里挡掉，虽然下面那道总长判断现在同样拦得住它们
+            // （见那里的注释），但让非法坐标根本不进引擎更清楚。
+            // 这是 binder 上的公开入口、数据来自其他组件，按项目约定必须记日志后降级而不是抛。
             for (double[] point : wgsPoints) {
                 if (point == null || point.length < 2
                         || !Double.isFinite(point[0]) || !Double.isFinite(point[1])) {
@@ -601,12 +607,21 @@ public class ServiceGo extends Service {
                 }
             }
             RoutePlayer player = new RoutePlayer(wgsPoints, closed, speedMps);
-            if (player.getTotalDistance() <= 0d) {
+            // 写成「总长不大于 0」而不是「总长 <= 0」：两者对负值和 0 等价，但 NaN 只被前者拦下
+            // （NaN <= 0d 为 false，!(NaN > 0d) 为 true）。NaN 总长是可达的——两个有限但极大的
+            // 坐标（如 +1e308 与 -1e308）会让 Haversine 里的 lng2 - lng1 溢出成 ±Inf，
+            // Math.sin(±Inf) 随即是 NaN。总长本身**不会**溢出成 Infinity：asin 把结果夹在 π/2
+            // 内，haversine 对任何有限输入都被 πR 界住，所以唯一能漏进来的就是 NaN。
+            // 漏进来会收下一条永远不结束、位置恒为 NaN 的路线。
+            if (!(player.getTotalDistance() > 0d)) {
                 return false;
             }
 
-            mRoutePlayer = player;
+            // 顺序是 flag-last：先写名字再写 player。读取方以 player 为判据键（getRouteProgress
+            // 先看 mRoutePlayer 再看 mRouteName），而 volatile 只对它**之前**的写给出 release
+            // 语义——反过来写，读者可能拿到新 player 配旧名字或空名字。
             mRouteName = routeName == null ? "" : routeName;
+            mRoutePlayer = player;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
             mLastTickMs = SystemClock.elapsedRealtime();
             // 表现层：摇杆禁用并变灰、内置地图跳到路线起点、通知换成「正在模拟路线」
@@ -621,8 +636,17 @@ public class ServiceGo extends Service {
             if (mRoutePlayer == null) {
                 return;
             }
-            mRoutePlayer = null;
+            // 与 startRoute 同序，也是 flag-last：先清名字再清 player。万一有人读到中间态，
+            // 看到的是「有 player 却没有名字」，界面按名字恢复选中行会直接放弃
+            // （selectRowByName 对空名字早退），而不是把旧名字配到另一条路线上。
             mRouteName = null;
+            mRoutePlayer = null;
+            // 速度与航向随路线一起复位：路线结束了，位置就静止了，而这两个值会继续被
+            // setLocationGPS/Network 上报。静止位置配 10 m/s 与最后一段的航向，正是目标 App
+            // 可以据以识别的破绽。航向取 0（DEFAULT_BEA）：静止时它没有意义，真机静止历元里
+            // 即便有值也是噪声，0 是最不容易被读成异常的那个取值。
+            mSpeed = 0d;
+            mCurBea = DEFAULT_BEA;
             // 表现层：摇杆交还用户、通知退回「服务正在运行中」。
             // 放在置 null 之后——两者都在执行时重读 mRoutePlayer
             refreshJoyStickInputEnabled();
@@ -650,10 +674,13 @@ public class ServiceGo extends Service {
     }
 
     /**
-     * 服务是否存活。
+     * 服务是否存活。目前唯一的调用者是 {@code RouteSimulationActivity}：服务没活着就不可能有路线
+     * 在跑，也正因如此它只在存活时才绑定，免得 {@code BIND_AUTO_CREATE} 把服务创建出来。
      *
-     * <p>供 {@code MainActivity} 对账 {@code isMockServStart}——模拟界面也能独立启动本服务，
-     * 那个 Activity 私有字段会因此陈旧。顺带修掉「服务被系统杀死后字段仍是 true」的既有隐患。
+     * <p>它**不**给 {@code MainActivity.isMockServStart} 对账。那个字段同时守着两处
+     * {@code unbindService}，而 {@code mServiceBinder} 只在 MainActivity 自己的连接里赋值，
+     * 直接赋值会解绑一个未注册的连接并让 FAB 分支解引用空 binder——这是 CLAUDE.md「已知缺陷」
+     * 一节记着的事。别在注释里给本标志安上它没有的消费者。
      */
     public static boolean isAlive() {
         return sAlive;

@@ -195,7 +195,12 @@ public class RouteSimulationActivity extends BaseActivity {
         // 模拟位置服务启动了，显然不是用户要的。
         // 服务没活着就不可能有路线在跑，直接按「未开始」显示即可。
         if (!mBound && ServiceGo.isAlive()) {
-            bindService(new Intent(this, ServiceGo.class), mConnection, Context.BIND_AUTO_CREATE);
+            // 绑定失败时 onServiceConnected 永远不会来，界面会一直按「未开始」显示，
+            // 而服务可能正在跑一条路线。提示一次，别让它无声地骗人。
+            if (!bindService(new Intent(this, ServiceGo.class), mConnection, Context.BIND_AUTO_CREATE)) {
+                XLog.e("ROUTE_SIM: ERROR - onResume 绑定服务失败");
+                GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_bind_failed));
+            }
         }
         mPollHandler.post(mPollTask);
     }
@@ -491,7 +496,13 @@ public class RouteSimulationActivity extends BaseActivity {
         } else {
             // 绑定是异步的，真正的 startRoute 在 onServiceConnected 里补发
             mPendingStart = true;
-            bindService(new Intent(this, ServiceGo.class), mConnection, Context.BIND_AUTO_CREATE);
+            if (!bindService(new Intent(this, ServiceGo.class), mConnection, Context.BIND_AUTO_CREATE)) {
+                // 绑定失败 → onServiceConnected 不会来 → mPendingStart 会永远挂着，
+                // 「开始模拟」变成一个按了没反应的按钮。撤销意图并如实提示。
+                mPendingStart = false;
+                XLog.e("ROUTE_SIM: ERROR - startSimulation 绑定服务失败");
+                GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_bind_failed));
+            }
         }
     }
 

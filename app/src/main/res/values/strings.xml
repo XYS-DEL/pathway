@@ -122,6 +122,7 @@
     <string name="input_position_gps">GPS 坐标系</string>
     <string name="input_button">输入位置</string>
     <string name="cur_position">返回当前位置</string>
+    <string name="app_teleport_route_ended">已传送到新位置，正在模拟的路线已结束</string>
     <string name="zoom_in">放大</string>
     <string name="zoom_out">缩小</string>
 
@@ -175,11 +176,13 @@
     <string name="nfc_card_share_empty">尚无内容可共享</string>
     <string name="nfc_card_share_package_absent">（无包名）</string>
 
-    <!-- 模拟路线（占位界面） -->
+    <!-- 模拟路线（界面已实现：选路线、档位、开始 / 结束模拟） -->
     <string name="app_route_simulation">模拟路线</string>
     <string name="app_route_playing">正在模拟路线</string>
     <string name="app_route_arrived">已到达终点</string>
     <string name="note_route_stop">结束路线</string>
+    <!-- 刻意保留的死字符串，不是未完成功能的残留：留着是为了必要时能退回占位版，
+         lint 的 UnusedResources 对它是有意接受的。 -->
     <string name="route_sim_placeholder">模拟路线功能开发中</string>
     <string name="route_sim_received">已收到以下参数（仅用于核对交接是否正确）</string>
     <string name="route_sim_list_title">选择路线</string>
@@ -195,6 +198,7 @@
     <string name="route_sim_stop">结束路线</string>
     <string name="route_sim_need_selection">请先选一条路线</string>
     <string name="route_sim_start_failed">这条路线无法模拟（点数不足或长度为零）</string>
+    <string name="route_sim_bind_failed">无法连接到模拟服务，请重试</string>
     <string name="route_sim_status_idle">未开始</string>
     <string name="route_sim_status_arrived">已到达终点</string>
     <string name="route_sim_status_playing">模拟中 · 已走 %1$s / %2$s</string>

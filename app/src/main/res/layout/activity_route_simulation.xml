@@ -1,9 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 根布局必须有底色，否则本屏的芯片会消失。
+     速度档位与「开始模拟」用的是一套「半透明白填充 + 白描边」的悬浮片语言，那套语言是压在地图上
+     设计的（绘制界面）。本屏没有地图，窗口底是主题的 #FAFAFA，白片压上去之后：
+       未选中填充 #E0FFFFFF(α.878) → 254/255，与底色只差 4/255
+       未选中描边 #59FFFFFF(α.349) → 253/255，差 2/255
+       选中态填充是主题色实底，反而是唯一看得见的一个
+     结果是速度行渲染成一个绿胶囊加两段裸文字，点未选中的芯片没有按压反馈，禁用的「开始模拟」
+     既无填充也无边框、读起来像一行标签。
+     换成 #E0E0E0（Material Grey 300）后，各态与底色的差：填充 27、描边 11、按下填充 22、
+     禁用填充 19、禁用描边 9（单位 /255，均 ≥ 8）。
+     只在本布局设，不去改共享 drawable——绘制界面的观感是用户手工验收过的。
+
+     这里 ignore 掉 Overdraw：它报得没错（主题已经画了一层窗口底，本层等于又画一遍），
+     但那层窗口底正是要让芯片消失的东西。少画一次全屏填充换不来可读性，代价照付。
+     若日后要消掉它，正解是把底色改到该 Activity 的 windowBackground 上（只画一层），
+     而不是删掉本行。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:background="#E0E0E0"
+    tools:ignore="Overdraw">
 
     <TextView
         android:id="@+id/route_sim_status"
