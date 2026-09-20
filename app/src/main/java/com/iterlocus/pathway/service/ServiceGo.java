@@ -38,6 +38,7 @@ import com.iterlocus.pathway.RouteGeometry;
 import com.iterlocus.pathway.RoutePlayer;
 import com.iterlocus.pathway.RouteProgress;
 import com.iterlocus.pathway.SmoothRouteOffset;
+import com.iterlocus.pathway.SmoothValueOffset;
 import com.iterlocus.pathway.joystick.JoyStick;
 
 public class ServiceGo extends Service {
@@ -95,8 +96,12 @@ public class ServiceGo extends Service {
     private volatile String mRouteName;
     private volatile boolean mRoutePaused;
     private volatile double mRouteSpeedBeforePause;
+    private volatile double mRouteBaseSpeed;
+    private double mRouteBaseAltitude;
     /** 与路线会话同寿命；只由定位线程推进，跨闭合路线圈次不重置。 */
     private SmoothRouteOffset mRouteOffset;
+    private SmoothValueOffset mRouteSpeedOffset;
+    private SmoothValueOffset mRouteAltitudeOffset;
     /** 上一 tick 的时刻，用于算真实的 dt。主线程写（onCreate / startRoute）、定位线程读写，故 volatile。 */
     private volatile long mLastTickMs;
     /** 主线程 Handler：摇杆是 View，只能在主线程碰。 */
@@ -473,6 +478,17 @@ public class ServiceGo extends Service {
                 return;
             }
 
+            if (!mRoutePaused) {
+                if (mRouteSpeedOffset != null) {
+                    mRouteSpeedOffset.advance(dt);
+                }
+                if (mRouteAltitudeOffset != null) {
+                    mRouteAltitudeOffset.advance(dt);
+                }
+            }
+            double effectiveSpeed = Math.max(0d, mRouteBaseSpeed
+                    + (mRouteSpeedOffset == null ? 0d : mRouteSpeedOffset.getValue()));
+            player.setSpeed(mRoutePaused ? 0d : effectiveSpeed);
             player.advance(dt);
 
             double[] position = player.getPosition();
@@ -497,6 +513,8 @@ public class ServiceGo extends Service {
             mCurLat = position[1];
             mCurBea = (float) player.getBearing();
             mSpeed = player.getSpeed();
+            mCurAlt = mRouteBaseAltitude
+                    + (mRouteAltitudeOffset == null ? 0d : mRouteAltitudeOffset.getValue());
 
             // 到达检测放在路由体末尾（回写之后）：方法开头的 isFinished() 早退保证
             // 已完成的路线不会再走到这里，所以本行恰好触发一次，不需要「是否已触发」标志。
@@ -783,7 +801,9 @@ public class ServiceGo extends Service {
             mRouteName = routeName == null ? "" : routeName;
             mRoutePaused = false;
             mRouteSpeedBeforePause = Math.max(0d, speedMps);
-            mRouteOffset = createRouteOffset();
+            mRouteBaseSpeed = Math.max(0d, speedMps);
+            mRouteBaseAltitude = mCurAlt;
+            createRouteOffsets();
             mJoyStickDesiredVisible = false;
             mRoutePlayer = player;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
@@ -809,7 +829,10 @@ public class ServiceGo extends Service {
             mRoutePlayer = null;
             mRoutePaused = false;
             mRouteSpeedBeforePause = 0d;
+            mRouteBaseSpeed = 0d;
             mRouteOffset = null;
+            mRouteSpeedOffset = null;
+            mRouteAltitudeOffset = null;
             mJoyStickDesiredVisible = false;
             // 速度与航向随路线一起复位：路线结束了，位置就静止了，而这两个值会继续被
             // setLocationGPS/Network 上报。静止位置配 10 m/s 与最后一段的航向，正是目标 App
@@ -831,7 +854,7 @@ public class ServiceGo extends Service {
             if (player == null || player.isFinished() || mRoutePaused) {
                 return;
             }
-            mRouteSpeedBeforePause = player.getSpeed();
+            mRouteSpeedBeforePause = mRouteBaseSpeed;
             player.setSpeed(0d);
             mSpeed = 0d;
             mRoutePaused = true;
@@ -844,7 +867,9 @@ public class ServiceGo extends Service {
             if (player == null || player.isFinished() || !mRoutePaused) {
                 return;
             }
-            double speed = mRouteSpeedBeforePause;
+            double speed = Math.max(0d, mRouteSpeedBeforePause
+                    + (mRouteSpeedOffset == null ? 0d : mRouteSpeedOffset.getValue()));
+            mRouteBaseSpeed = mRouteSpeedBeforePause;
             player.setSpeed(speed);
             mSpeed = speed;
             mRoutePaused = false;
@@ -856,9 +881,12 @@ public class ServiceGo extends Service {
             RoutePlayer player = mRoutePlayer;
             if (player != null) {
                 if (mRoutePaused) {
-                    mRouteSpeedBeforePause = Math.max(0d, speedMps);
+                    mRouteBaseSpeed = Math.max(0d, speedMps);
+                    mRouteSpeedBeforePause = mRouteBaseSpeed;
                 } else {
-                    player.setSpeed(speedMps);
+                    mRouteBaseSpeed = Math.max(0d, speedMps);
+                    player.setSpeed(Math.max(0d, mRouteBaseSpeed
+                            + (mRouteSpeedOffset == null ? 0d : mRouteSpeedOffset.getValue())));
                 }
             }
         }
@@ -869,20 +897,29 @@ public class ServiceGo extends Service {
             if (player == null) {
                 return null;
             }
-            return new RouteProgress(mRouteName, player.isFinished(), mRoutePaused, player.getSpeed(),
+            return new RouteProgress(mRouteName, player.isFinished(), mRoutePaused, mRouteBaseSpeed,
                     player.getDistanceCovered(), player.getTotalDistance(), player.getLapCount());
         }
     }
 
-    private SmoothRouteOffset createRouteOffset() {
+    private void createRouteOffsets() {
         SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
         if (!preferences.getBoolean("setting_random_offset", false)) {
-            return null;
+            mRouteOffset = null;
+            mRouteSpeedOffset = null;
+            mRouteAltitudeOffset = null;
+            return;
         }
         String fallback = getString(R.string.setting_random_offset_default);
         double maxEast = readOffsetPreference(preferences, "setting_lon_max_offset", fallback);
         double maxNorth = readOffsetPreference(preferences, "setting_lat_max_offset", fallback);
-        return new SmoothRouteOffset(maxEast, maxNorth);
+        double maxSpeed = readOffsetPreference(preferences, "setting_speed_max_offset",
+                getString(R.string.setting_speed_offset_default));
+        double maxAltitude = readOffsetPreference(preferences, "setting_altitude_max_offset",
+                getString(R.string.setting_altitude_offset_default));
+        mRouteOffset = new SmoothRouteOffset(maxEast, maxNorth);
+        mRouteSpeedOffset = new SmoothValueOffset(maxSpeed, 12d, 12d, 0.08d);
+        mRouteAltitudeOffset = new SmoothValueOffset(maxAltitude, 20d, 20d, 0.25d);
     }
 
     private double readOffsetPreference(SharedPreferences preferences, String key, String fallback) {

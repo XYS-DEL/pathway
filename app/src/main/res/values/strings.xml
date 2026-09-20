@@ -73,12 +73,16 @@
     <string name="setting_altitude_invalid">请输入 -500.0 到 10000.0 米之间的有效海拔</string>
 
     <!-- 位置偏移相关参数 -->
-    <string name="setting_group_location_offset">位置偏移</string>
+    <string name="setting_group_offset">偏移</string>
     <string name="setting_random_offset">随机偏移</string>
     <string name="setting_random_offset_summary">用于历史位置和路线模拟；路线中为平滑连续漂移</string>
     <string name="setting_random_offset_default">10.0</string>
     <string name="setting_lat_max_offset">纬度最大偏移距离(米)</string>
     <string name="setting_lon_max_offset">经度最大偏移距离(米)</string>
+    <string name="setting_speed_max_offset">最大速度偏移(米/秒)</string>
+    <string name="setting_speed_offset_default">0.3</string>
+    <string name="setting_altitude_max_offset">最大海拔偏移(米)</string>
+    <string name="setting_altitude_offset_default">2.0</string>
     <!-- 记录相关参数 -->
     <string name="setting_group_log">记录</string>
     <string name="setting_log_off">关闭日志</string>

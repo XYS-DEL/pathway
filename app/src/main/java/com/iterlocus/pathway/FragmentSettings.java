@@ -101,6 +101,12 @@ public class FragmentSettings extends PreferenceFragmentCompat {
         EditTextPreference pfLonOffset = findPreference("setting_lon_max_offset");
         setupDecimalEditTextPreference(pfLonOffset);
 
+        EditTextPreference pfSpeedOffset = findPreference("setting_speed_max_offset");
+        setupDecimalEditTextPreference(pfSpeedOffset);
+
+        EditTextPreference pfAltitudeOffset = findPreference("setting_altitude_max_offset");
+        setupDecimalEditTextPreference(pfAltitudeOffset);
+
         SwitchPreferenceCompat pLog = findPreference("setting_log_off");
         if (pLog != null) {
             pLog.setOnPreferenceChangeListener((preference, newValue) -> {
