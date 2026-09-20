@@ -348,6 +348,7 @@ isMockServStart = ServiceGo.isAlive();
 - `app/src/main/java/com/iterlocus/pathway/MainActivity.java` — 菜单项处理 + `onResume` 对账
 - `app/src/main/res/menu/menu_nav.xml` — 侧滑新增 `nav_route_sim`（挨着「绘制路线」）
 - `app/src/main/res/values/strings.xml` — 新增文案，`app_*` 前缀
+- `app/src/main/res/drawable/bg_tool_chip_accent.xml` — 由纯 `<shape>` 改为 `<selector>`，补禁用态（见下）
 
 **复用**
 
@@ -365,6 +366,8 @@ isMockServStart = ServiceGo.isAlive();
 `View.setActivated` 会经 `ViewGroup.dispatchSetActivated` **传播到子视图**，所以行内两个 `TextView` 用同一个文字色 selector 就能跟着变，不需要在 `getView` 里手动逐个设色。
 
 配色与 `bg_tool_chip_toggle` / `chip_text_toggle` 保持一致（选中 = 主题色实底 + 白字，4.54:1 过 WCAG AA）。
+
+**`bg_tool_chip_accent` 必须补禁用态。** 它现在是纯 `<shape>`，没有 `state_enabled` 分支；而模拟界面的「开始模拟」在库里没有路线时要 `setEnabled(false)`。外观不变的禁用态正是本项目栽过的那个坑（Ruling UI-4），所以改成 selector 补上淡态。绘制界面的「完成绘制」用的是同一个 drawable，它从不禁用，因此不受影响。
 
 **注册与启动模式**：`RouteSimulationActivity` 已在 manifest 中注册。它承载 NFC 前台调度，**必须保持默认启动模式**（`nfc` 模块 README 明确要求接收标签的 Activity 不能是 `singleInstance`）。`MainActivity` 是 `singleInstance`，别照抄。
 
