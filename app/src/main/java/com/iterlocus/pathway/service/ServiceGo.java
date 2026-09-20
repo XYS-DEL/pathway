@@ -10,6 +10,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationManager;
@@ -27,13 +28,16 @@ import android.os.SystemClock;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
+import androidx.preference.PreferenceManager;
 
 import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.MainActivity;
+import com.iterlocus.pathway.LocationOffset;
 import com.iterlocus.pathway.R;
 import com.iterlocus.pathway.RouteGeometry;
 import com.iterlocus.pathway.RoutePlayer;
 import com.iterlocus.pathway.RouteProgress;
+import com.iterlocus.pathway.SmoothRouteOffset;
 import com.iterlocus.pathway.joystick.JoyStick;
 
 public class ServiceGo extends Service {
@@ -90,6 +94,8 @@ public class ServiceGo extends Service {
     private volatile String mRouteName;
     private volatile boolean mRoutePaused;
     private volatile double mRouteSpeedBeforePause;
+    /** 与路线会话同寿命；只由定位线程推进，跨闭合路线圈次不重置。 */
+    private SmoothRouteOffset mRouteOffset;
     /** 上一 tick 的时刻，用于算真实的 dt。主线程写（onCreate / startRoute）、定位线程读写，故 volatile。 */
     private volatile long mLastTickMs;
     /** 主线程 Handler：摇杆是 View，只能在主线程碰。 */
@@ -464,6 +470,14 @@ public class ServiceGo extends Service {
             if (mRoutePlayer != player) {
                 return;
             }
+            SmoothRouteOffset offset = mRouteOffset;
+            if (offset != null) {
+                if (!mRoutePaused) {
+                    offset.advance(dt);
+                }
+                position = LocationOffset.applyMeters(position[0], position[1],
+                        offset.getEastMeters(), offset.getNorthMeters());
+            }
             mCurLng = position[0];
             mCurLat = position[1];
             mCurBea = (float) player.getBearing();
@@ -744,6 +758,7 @@ public class ServiceGo extends Service {
             mRouteName = routeName == null ? "" : routeName;
             mRoutePaused = false;
             mRouteSpeedBeforePause = Math.max(0d, speedMps);
+            mRouteOffset = createRouteOffset();
             mJoyStickDesiredVisible = false;
             mRoutePlayer = player;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
@@ -769,6 +784,7 @@ public class ServiceGo extends Service {
             mRoutePlayer = null;
             mRoutePaused = false;
             mRouteSpeedBeforePause = 0d;
+            mRouteOffset = null;
             mJoyStickDesiredVisible = false;
             // 速度与航向随路线一起复位：路线结束了，位置就静止了，而这两个值会继续被
             // setLocationGPS/Network 上报。静止位置配 10 m/s 与最后一段的航向，正是目标 App
@@ -830,6 +846,27 @@ public class ServiceGo extends Service {
             }
             return new RouteProgress(mRouteName, player.isFinished(), mRoutePaused, player.getSpeed(),
                     player.getDistanceCovered(), player.getTotalDistance(), player.getLapCount());
+        }
+    }
+
+    private SmoothRouteOffset createRouteOffset() {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        if (!preferences.getBoolean("setting_random_offset", false)) {
+            return null;
+        }
+        String fallback = getString(R.string.setting_random_offset_default);
+        double maxEast = readOffsetPreference(preferences, "setting_lon_max_offset", fallback);
+        double maxNorth = readOffsetPreference(preferences, "setting_lat_max_offset", fallback);
+        return new SmoothRouteOffset(maxEast, maxNorth);
+    }
+
+    private double readOffsetPreference(SharedPreferences preferences, String key, String fallback) {
+        try {
+            double value = Double.parseDouble(preferences.getString(key, fallback));
+            return Double.isFinite(value) ? Math.abs(value) : Double.parseDouble(fallback);
+        } catch (NumberFormatException e) {
+            XLog.e("SERVICEGO: ERROR - readOffsetPreference");
+            return Double.parseDouble(fallback);
         }
     }
 

@@ -218,6 +218,10 @@ Activity 上的定时器都会在后台被冻结，位置就不动了，那样�
 - **暂停由服务持有，不由 Activity 定时器模拟。** `pauseRoute()` 保存当前速度后把 `RoutePlayer` 速度置 0，
   `resumeRoute()` 恢复；暂停时切换档位只更新待恢复速度，不能隐式继续。`RouteProgress.isPaused()` 是服务传出的
   显式状态，不能靠速度为 0 推断，因为档位速度允许用户自由输入。
+- **路线随机偏移是连续漂移，不是逐 tick 白噪声。** `SmoothRouteOffset` 在配置的东西/南北半径形成的椭圆内
+  均匀选择目标，用 smoothstep 过渡并将额外漂移速度限制在约 0.35 m/s；实例与整次路线会话同寿命，闭合路线
+  换圈绝不重置，因此起终点接缝不会跳。暂停时冻结偏移但仍应用当前值，继续后从原状态接着走。偏移加在
+  `RoutePlayer` 输出的 WGS84 上，之后直接写 mock provider。
 - **需要「执行时重新求值」的状态不要传值。** `refreshJoyStickInputEnabled()` 与 `updateNotification()`
   投递的是会重读当前状态的任务，而不是调用点算好的布尔值 / 文案。传值版本有一条可达的陈旧写入竞态：
   定位线程算出「该恢复」的同时主线程刚好开了新路线，后到的那次会写回旧结论。
@@ -281,7 +285,7 @@ arm64-v8a）：行选中态的观感、速度档位片、空态与禁用态、�
 
 `:nfc` 是独立的 Gradle 库模块（`com.android.library`，namespace `com.acooldog.nfc`），零第三方依赖、无资源、无 manifest 声明，设计目标是可整体复制到别的工程。它提供读卡（`NfcReaderSession`）、伪造贴卡派发（`NfcSender`）、配置持久化（`NfcConfigStore`）。
 
-`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`——那个界面已经做完了选路线、档位与开始 / 结束模拟（见「路线模拟」一节），但它**不解析这三个值**——成功开始路线后，有包名就通过 `NfcSender` 发伪 NDEF 事件，无包名才走普通 URL 跳转；source 只原样显示供核对；从 URL 里解析坐标仍是后续工作。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
+`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`；模拟页也可通过「导入NFC配置」直接选择 `NfcConfigStore.getSavedConfigs()` 中的配置，无需先进入读卡页。成功开始路线后，有包名就通过 `NfcSender` 发伪 NDEF 事件，无包名才走普通 URL 跳转；从 URL 里解析坐标仍是后续工作。路线运行期间导入按钮禁用，因为切换载荷不会重新发送本次已经发出的 NFC。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
 
 两条硬约束：
 

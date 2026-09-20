@@ -75,7 +75,7 @@
     <!-- 位置偏移相关参数 -->
     <string name="setting_group_location_offset">位置偏移</string>
     <string name="setting_random_offset">随机偏移</string>
-    <string name="setting_random_offset_summary">仅在使用历史位置时生效</string>
+    <string name="setting_random_offset_summary">用于历史位置和路线模拟；路线中为平滑连续漂移</string>
     <string name="setting_random_offset_default">10.0</string>
     <string name="setting_lat_max_offset">纬度最大偏移距离(米)</string>
     <string name="setting_lon_max_offset">经度最大偏移距离(米)</string>
@@ -218,6 +218,11 @@
     <string name="route_sim_meters">%1$d 米</string>
     <string name="route_sim_kilometers">%1$.1f 公里</string>
     <string name="route_sim_pick_route_named">路线：%1$s</string>
+    <string name="route_sim_nfc_import">导入NFC配置</string>
+    <string name="route_sim_nfc_pick_title">选择NFC配置</string>
+    <string name="route_sim_nfc_empty">还没有保存的NFC配置，请先在“读取NFC”中保存</string>
+    <string name="route_sim_nfc_imported">已导入NFC配置：%1$s</string>
+    <string name="route_sim_nfc_config_name">配置：%1$s</string>
     <string name="route_sim_panel_collapse">收起面板</string>
     <string name="route_sim_panel_expand">展开面板</string>
     <string name="route_sim_arrow_collapse">▾</string>

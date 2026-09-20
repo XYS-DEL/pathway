@@ -28,6 +28,8 @@ import androidx.preference.PreferenceManager;
 import com.acooldog.nfc.NfcPayload;
 import com.acooldog.nfc.NfcPayloadDispatchResult;
 import com.acooldog.nfc.NfcSender;
+import com.acooldog.nfc.NfcConfigStore;
+import com.acooldog.nfc.SavedNfcConfig;
 import com.baidu.mapapi.map.BaiduMap;
 import com.baidu.mapapi.map.BitmapDescriptorFactory;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
@@ -62,8 +64,8 @@ import java.util.List;
  * 画线与框相机（百度地图原生就是 BD09）；{@link RouteRow#wgsPoints} 是喂给
  * {@link ServiceGo.ServiceGoBinder#startRoute} 的 WGS84。两边都不再做任何换算。
  *
- * <p>本界面<b>不解析 NFC 卡片</b>：URL 只用来在模拟开起来之后做一次外部跳转，包名与 source
- * 只原样列出来供核对。从 URL 里取坐标仍是后续工作。
+ * <p>本界面<b>不解析 NFC 卡片</b>：URL 与包名在模拟开起来之后用于发送伪 NDEF；载荷既可由
+ * 「读取NFC」页面传入，也可从本地保存的 NFC 配置中导入。从 URL 里取坐标仍是后续工作。
  */
 public class RouteSimulationActivity extends BaseActivity {
 
@@ -78,6 +80,10 @@ public class RouteSimulationActivity extends BaseActivity {
 
     /** 系统重建时存/取选中行。行序取自 DataBaseRoute.queryAll（按创建时间倒序），是稳定的。 */
     private static final String STATE_SELECTED_INDEX = "STATE_SELECTED_INDEX";
+    private static final String STATE_CARD_URL = "STATE_CARD_URL";
+    private static final String STATE_CARD_PACKAGE = "STATE_CARD_PACKAGE";
+    private static final String STATE_CARD_SOURCE = "STATE_CARD_SOURCE";
+    private static final String STATE_CARD_CONFIG_NAME = "STATE_CARD_CONFIG_NAME";
     private static final String PREF_LAST_ROUTE_NAME = "route_sim_last_route_name";
     /** 折叠态也跨重建保持，否则每次旋转面板都自己弹回来。 */
     private static final String STATE_PANEL_COLLAPSED = "STATE_PANEL_COLLAPSED";
@@ -112,11 +118,13 @@ public class RouteSimulationActivity extends BaseActivity {
     /** 正开着的选路线弹窗。存下来是为了在 onDestroy 里收掉——否则弹窗开着旋转会 WindowLeaked，
      *  而且弹窗的 ListView 持有 {@link RouteListAdapter}，等于间接持有这个 Activity。 */
     private AlertDialog mRoutePickerDialog;
+    private AlertDialog mNfcPickerDialog;
 
     private TextView mStatusText;
     private TextView mPrimaryButton;
     private TextView mPauseButton;
     private TextView mPickButton;
+    private TextView mImportNfcButton;
     private TextView mToggleButton;
     private View mPanelBody;
     private RadioGroup mSpeedGroup;
@@ -138,6 +146,12 @@ public class RouteSimulationActivity extends BaseActivity {
     private boolean mNeedsReframe;
     /** applySpeedSelection() 里的 check() 会回调监听器，用它挡住自触发。 */
     private boolean mApplyingSpeed;
+
+    private NfcConfigStore mNfcConfigStore;
+    private String mCardUrl = "";
+    private String mCardPackageName = "";
+    private String mCardSource = "";
+    private String mCardConfigName = "";
 
     private ServiceGo.ServiceGoBinder mServiceBinder;
     private boolean mBound;
@@ -189,6 +203,7 @@ public class RouteSimulationActivity extends BaseActivity {
 
         mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         mRouteDb = new DataBaseRoute(getApplicationContext()).getWritableDatabase();
+        mNfcConfigStore = new NfcConfigStore(this);
 
         mMapView = findViewById(R.id.route_sim_map);
         mBaiduMap = mMapView.getMap();
@@ -197,15 +212,18 @@ public class RouteSimulationActivity extends BaseActivity {
         mPrimaryButton = findViewById(R.id.route_sim_primary);
         mPauseButton = findViewById(R.id.route_sim_pause);
         mPickButton = findViewById(R.id.route_sim_pick);
+        mImportNfcButton = findViewById(R.id.route_sim_import_nfc);
         mToggleButton = findViewById(R.id.route_sim_toggle);
         mPanelBody = findViewById(R.id.route_sim_body);
         mSpeedGroup = findViewById(R.id.route_sim_speed_group);
 
-        showReceivedCardFields();
+        initializeCardPayload(savedInstanceState);
+        renderCardFields();
 
         mAdapter = new RouteListAdapter();
 
         mPickButton.setOnClickListener(v -> showRoutePicker());
+        mImportNfcButton.setOnClickListener(v -> showNfcConfigPicker());
         findViewById(R.id.route_sim_handle).setOnClickListener(v -> togglePanel());
         applyPanelCollapsed(false);
 
@@ -225,6 +243,10 @@ public class RouteSimulationActivity extends BaseActivity {
         // 只存选中行与折叠态。档位由框架自己恢复 RadioGroup，进度由轮询重新拉，都不必存。
         outState.putInt(STATE_SELECTED_INDEX, mSelectedIndex);
         outState.putBoolean(STATE_PANEL_COLLAPSED, mPanelCollapsed);
+        outState.putString(STATE_CARD_URL, mCardUrl);
+        outState.putString(STATE_CARD_PACKAGE, mCardPackageName);
+        outState.putString(STATE_CARD_SOURCE, mCardSource);
+        outState.putString(STATE_CARD_CONFIG_NAME, mCardConfigName);
     }
 
     @Override
@@ -293,6 +315,10 @@ public class RouteSimulationActivity extends BaseActivity {
             mRoutePickerDialog.dismiss();
             mRoutePickerDialog = null;
         }
+        if (mNfcPickerDialog != null) {
+            mNfcPickerDialog.dismiss();
+            mNfcPickerDialog = null;
+        }
 
         if (mBound) {
             unbindService(mConnection);
@@ -343,29 +369,70 @@ public class RouteSimulationActivity extends BaseActivity {
 
     /*===== NFC 交接字段 =====*/
 
-    private void showReceivedCardFields() {
+    private void initializeCardPayload(Bundle savedInstanceState) {
+        if (savedInstanceState != null) {
+            mCardUrl = valueOrEmpty(savedInstanceState.getString(STATE_CARD_URL));
+            mCardPackageName = valueOrEmpty(savedInstanceState.getString(STATE_CARD_PACKAGE));
+            mCardSource = valueOrEmpty(savedInstanceState.getString(STATE_CARD_SOURCE));
+            mCardConfigName = valueOrEmpty(savedInstanceState.getString(STATE_CARD_CONFIG_NAME));
+            return;
+        }
         Intent intent = getIntent();
-        String url = intent.getStringExtra(EXTRA_CARD_URL);
-        String packageName = intent.getStringExtra(EXTRA_CARD_PACKAGE);
-        String source = intent.getStringExtra(EXTRA_SOURCE);
+        mCardUrl = valueOrEmpty(intent.getStringExtra(EXTRA_CARD_URL));
+        mCardPackageName = valueOrEmpty(intent.getStringExtra(EXTRA_CARD_PACKAGE));
+        mCardSource = valueOrEmpty(intent.getStringExtra(EXTRA_SOURCE));
+    }
 
+    private void renderCardFields() {
         TextView content = findViewById(R.id.route_sim_content);
-
-        // 从侧滑菜单进来时三个字段全空，这块是给开发者看的调试卷，
-        // 常驻在用户可见界面上只会是三行「—」的噪音（大字号下它也是被挤出屏幕的那一块）。
-        // 从 NFC 卡片进来时照旧显示，核对交接的用途不变。
-        if (isEmpty(url) && isEmpty(packageName) && isEmpty(source)) {
+        if (isEmpty(mCardUrl) && isEmpty(mCardPackageName) && isEmpty(mCardSource)) {
             content.setVisibility(View.GONE);
             return;
         }
 
+        content.setVisibility(View.VISIBLE);
         StringBuilder builder = new StringBuilder();
         builder.append(getResources().getString(R.string.route_sim_received)).append("\n\n");
-        builder.append(EXTRA_CARD_URL).append(":\n").append(orDash(url)).append("\n\n");
-        builder.append(EXTRA_CARD_PACKAGE).append(":\n").append(orDash(packageName)).append("\n\n");
-        builder.append(EXTRA_SOURCE).append(":\n").append(orDash(source));
+        if (!isEmpty(mCardConfigName)) {
+            builder.append(getString(R.string.route_sim_nfc_config_name, mCardConfigName))
+                    .append("\n\n");
+        }
+        builder.append(EXTRA_CARD_URL).append(":\n").append(orDash(mCardUrl)).append("\n\n");
+        builder.append(EXTRA_CARD_PACKAGE).append(":\n").append(orDash(mCardPackageName))
+                .append("\n\n");
+        builder.append(EXTRA_SOURCE).append(":\n").append(orDash(mCardSource));
 
         content.setText(builder.toString());
+    }
+
+    private void showNfcConfigPicker() {
+        List<SavedNfcConfig> configs = mNfcConfigStore.getSavedConfigs();
+        if (configs.isEmpty()) {
+            GoUtils.DisplayToast(this, getString(R.string.route_sim_nfc_empty));
+            return;
+        }
+
+        String[] names = new String[configs.size()];
+        for (int index = 0; index < configs.size(); index++) {
+            names[index] = configs.get(index).getName();
+        }
+        mNfcPickerDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.route_sim_nfc_pick_title)
+                .setItems(names, (dialog, which) -> {
+                    SavedNfcConfig config = configs.get(which);
+                    mCardConfigName = config.getName();
+                    mCardUrl = config.getUrl();
+                    mCardPackageName = config.getPackageName();
+                    mCardSource = config.getSource();
+                    mNfcConfigStore.savePayload(mCardUrl, mCardPackageName, mCardSource);
+                    renderCardFields();
+                    GoUtils.DisplayToast(this, getString(
+                            R.string.route_sim_nfc_imported, config.getName()));
+                })
+                .setNegativeButton(R.string.app_dialog_cancel, null)
+                .create();
+        mNfcPickerDialog.setOnDismissListener(dialog -> mNfcPickerDialog = null);
+        mNfcPickerDialog.show();
     }
 
     private boolean isEmpty(String value) {
@@ -374,6 +441,10 @@ public class RouteSimulationActivity extends BaseActivity {
 
     private String orDash(String value) {
         return isEmpty(value) ? "—" : value;
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     /*===== 路线列表与地图 =====*/
@@ -915,21 +986,18 @@ public class RouteSimulationActivity extends BaseActivity {
      * 模拟**：那才是有用的结果。
      */
     private void sendCardPayload() {
-        String url = getIntent().getStringExtra(EXTRA_CARD_URL);
-        if (isEmpty(url)) {
+        if (isEmpty(mCardUrl)) {
             return;
         }
 
-        String packageName = getIntent().getStringExtra(EXTRA_CARD_PACKAGE);
-        String source = getIntent().getStringExtra(EXTRA_SOURCE);
-        if (isEmpty(packageName)) {
+        if (isEmpty(mCardPackageName)) {
             // 没有 AAR 包名时无法伪造定向 NFC 事件，保留普通 URL 的兼容路径。
-            openCardUrl(url);
+            openCardUrl(mCardUrl);
             return;
         }
 
         NfcPayloadDispatchResult result = NfcSender.send(
-                this, new NfcPayload(url, packageName, source));
+                this, new NfcPayload(mCardUrl, mCardPackageName, mCardSource));
         if (!result.isSuccessful()) {
             XLog.e("ROUTE_SIM: ERROR - sendCardPayload: " + result.getDetail());
             GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_open_url_failed));
@@ -977,6 +1045,7 @@ public class RouteSimulationActivity extends BaseActivity {
             mPauseButton.setVisibility(View.GONE);
             // 没有路线在跑，可以随便换；库是空的就置灰
             mPickButton.setEnabled(!mRows.isEmpty());
+            mImportNfcButton.setEnabled(true);
             return;
         }
 
@@ -995,6 +1064,7 @@ public class RouteSimulationActivity extends BaseActivity {
         // selectRowByName 又把选中翻回去——一次注定失败的操作，还附带折线与相机的抖动。
         // 置灰用的是现成的禁用片样式（bg_tool_chip / chip_text 都带禁用态），没有新资源。
         mPickButton.setEnabled(false);
+        mImportNfcButton.setEnabled(false);
 
         // 系统重建后靠这里把选中行与档位对回去
         selectRowByName(progress.getRouteName());

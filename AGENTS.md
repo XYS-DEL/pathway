@@ -24,6 +24,7 @@
 - Baidu map/UI coordinates are BD09. Android test providers and `RoutePlayer` use WGS84. Convert exactly at the boundary with `MapUtils.bd2wgs`/`wgs2bd09`; do not add a second conversion.
 - Coordinate arrays and `MapUtils` arguments are `{longitude, latitude}` even though Baidu `LatLng` constructors take `(latitude, longitude)`.
 - `RoutePlayer` accepts WGS84 `double[][]`; route points loaded from `RouteConfig` are BD09 and must be converted once when building a simulation row. Route playback runs in `ServiceGo`, not an Activity.
+- Route random offset uses one `SmoothRouteOffset` per route session. It drifts continuously in WGS84 meter space, freezes while paused, and must not reset when a closed route starts a new lap.
 - `ServiceGo.setPosition()` stops route playback. While a route object exists (playing, paused, or arrived), joystick input and notification-triggered showing must remain disabled; ending a route keeps the overlay hidden.
 - `RouteConfig` rejects duplicate route names; do not change it to delete-then-insert. History databases intentionally deduplicate, but routes are protected from silent replacement.
 - Keep `LocationClientOption.SetIgnoreCacheException(true)` with the capital `S`; that is the Baidu SDK method name.
