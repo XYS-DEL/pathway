@@ -127,6 +127,13 @@ Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the orig
 
 `res/xml/preferences_main.xml` is the single source of preference keys; `WelcomeActivity` seeds defaults early with `PreferenceManager.setDefaultValues(..., false)`, and both `FragmentSettings` and the activities read via `PreferenceManager.getDefaultSharedPreferences`. Keys in use: `setting_joystick_type`, `setting_walk`, `setting_run`, `setting_bike`, `setting_altitude`, `setting_random_offset`, `setting_lat_max_offset`, `setting_lon_max_offset`, `setting_log_off`, `setting_history_expiration`, `setting_map_key`.
 
+- 「海拔高度」是一个设置项，点击后的同一对话框同时提供手动输入与「获取当前海拔」，不要拆成第二个 Preference。获取功能不能复用 `MainActivity` 的定位结果（主页明确 `setIsNeedAltitude(false)`）：它独立请求 GNSS 海拔，收 3 个有效样本取中位数并按 0.1 米回填；用户确认后才保存。模拟位置服务运行时必须拒绝采样，避免读回伪造海拔。0.1 米是存储分辨率，不代表手机 GNSS 的真实垂直精度。
+- 历史位置随机偏移是经度/纬度两轴独立均匀采样，所以范围是矩形而非圆。米转经度必须除以 `111320 * cos(latitude)`，纬度除以 `110574`；设置键 `setting_lon_max_offset` 对应经度、`setting_lat_max_offset` 对应纬度。
+
+### Welcome flow
+
+`WelcomeActivity` 只在首次成功进入应用前显示协议与「进入应用」按钮，并在同一个私有 SharedPreferences 文件记录 `KEY_HAS_ENTERED_APP`。后续启动隐藏控件，固定展示启动图 1.5 秒后进入主页；若定位权限被系统撤销则重新申请，授权后自动继续。首次进入仍保留协议、网络与 GPS 预检，后续启动不再被网络/GPS 状态卡在启动页。
+
 ### Logging
 
 `XLog` (initialized in `GoApplication`) writes to `<externalFilesDir>/Logs/Pathway.log` (the filename comes from the `APP_NAME` constant), console + file, 3-day retention, level `ALL`.

@@ -33,6 +33,7 @@ import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 
+import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.database.DataBaseHistoryLocation;
 import com.iterlocus.pathway.utils.GoUtils;
 
@@ -297,21 +298,34 @@ public class HistoryActivity extends BaseActivity {
 
     private String[] randomOffset(String longitude, String latitude) {
         String max_offset_default = getResources().getString(R.string.setting_random_offset_default);
-        double lon_max_offset = Double.parseDouble(Objects.requireNonNull(sharedPreferences.getString("setting_lon_max_offset", max_offset_default)));
-        double lat_max_offset = Double.parseDouble(Objects.requireNonNull(sharedPreferences.getString("setting_lat_max_offset", max_offset_default)));
+        double lon_max_offset = readNonNegativeOffset("setting_lon_max_offset", max_offset_default);
+        double lat_max_offset = readNonNegativeOffset("setting_lat_max_offset", max_offset_default);
         double lon = Double.parseDouble(longitude);
         double lat = Double.parseDouble(latitude);
 
         double randomLonOffset = (Math.random() * 2 - 1) * lon_max_offset;  // Longitude offset (meters)
         double randomLatOffset = (Math.random() * 2 - 1) * lat_max_offset;  // Latitude offset (meters)
 
-        lon += randomLonOffset / 111320;    // (meters -> longitude)
-        lat += randomLatOffset / 110574;    // (meters -> latitude)
+        double[] offsetPosition = LocationOffset.applyMeters(
+                lon, lat, randomLonOffset, randomLatOffset);
+        lon = offsetPosition[0];
+        lat = offsetPosition[1];
 
         String offsetMessage = String.format(Locale.US, "经度偏移: %.2f米\n纬度偏移: %.2f米", randomLonOffset, randomLatOffset);
         GoUtils.DisplayToast(this, offsetMessage);
 
         return new String[]{String.valueOf(lon), String.valueOf(lat)};
+    }
+
+    private double readNonNegativeOffset(String key, String fallback) {
+        try {
+            double value = Double.parseDouble(Objects.requireNonNull(
+                    sharedPreferences.getString(key, fallback)));
+            return Double.isFinite(value) ? Math.abs(value) : Double.parseDouble(fallback);
+        } catch (NumberFormatException e) {
+            XLog.e("HISTORY: ERROR - readNonNegativeOffset");
+            return Double.parseDouble(fallback);
+        }
     }
 
     private void initRecordListView() {

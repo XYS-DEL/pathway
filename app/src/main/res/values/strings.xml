@@ -63,14 +63,22 @@
     <string name="setting_bike_default">10.0</string>
     <string name="setting_altitude">海拔高度(米)</string>
     <string name="setting_altitude_default">55.0</string>
+    <string name="setting_altitude_dialog_title">设置海拔高度</string>
+    <string name="setting_altitude_current">获取当前海拔</string>
+    <string name="setting_altitude_capture_notice">请关闭模拟功能并处于开阔区域使用获取功能。</string>
+    <string name="setting_altitude_locating">正在采集 GNSS 海拔…</string>
+    <string name="setting_altitude_saved">已获取当前海拔：%1$.1f 米，请确认保存</string>
+    <string name="setting_altitude_failed">未获取到可靠的 GNSS 海拔，请到开阔处重试</string>
+    <string name="setting_altitude_stop_mock">请先结束模拟位置服务，再采集真实海拔</string>
+    <string name="setting_altitude_invalid">请输入 -500.0 到 10000.0 米之间的有效海拔</string>
 
     <!-- 位置偏移相关参数 -->
     <string name="setting_group_location_offset">位置偏移</string>
     <string name="setting_random_offset">随机偏移</string>
     <string name="setting_random_offset_summary">仅在使用历史位置时生效</string>
     <string name="setting_random_offset_default">10.0</string>
-    <string name="setting_lat_max_offset">经度最大偏移距离(米)</string>
-    <string name="setting_lon_max_offset">纬度最大偏移距离(米)</string>
+    <string name="setting_lat_max_offset">纬度最大偏移距离(米)</string>
+    <string name="setting_lon_max_offset">经度最大偏移距离(米)</string>
     <!-- 记录相关参数 -->
     <string name="setting_group_log">记录</string>
     <string name="setting_log_off">关闭日志</string>

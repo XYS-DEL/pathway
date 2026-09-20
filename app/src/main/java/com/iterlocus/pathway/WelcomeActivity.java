@@ -7,6 +7,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextPaint;
@@ -33,14 +35,20 @@ public class WelcomeActivity extends AppCompatActivity {
     private static SharedPreferences preferences;
     private static final String KEY_ACCEPT_AGREEMENT = "KEY_ACCEPT_AGREEMENT";
     private static final String KEY_ACCEPT_PRIVACY = "KEY_ACCEPT_PRIVACY";
+    private static final String KEY_HAS_ENTERED_APP = "KEY_HAS_ENTERED_APP";
+    private static final long RETURNING_SPLASH_DELAY_MS = 1500L;
 
     private static boolean isPermission = false;
     private static final int SDK_PERMISSION_REQUEST = 127;
     private static final ArrayList<String> ReqPermissions = new ArrayList<>();
 
     private CheckBox checkBox;
+    private Button mStartButton;
     private Boolean mAgreement;
     private Boolean mPrivacy;
+    private boolean mMarkEnteredAfterPermission;
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mReturningLaunch = () -> requestPermissionsAndLaunch(false);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,47 +59,37 @@ public class WelcomeActivity extends AppCompatActivity {
         // 生成默认参数的值（一定要尽可能早的调用，因为后续有些界面可能需要使用参数）
         PreferenceManager.setDefaultValues(this, R.xml.preferences_main, false);
 
-        Button startBtn = findViewById(R.id.startButton);
-        startBtn.setOnClickListener(v -> startMainActivity());
+        mStartButton = findViewById(R.id.startButton);
+        mStartButton.setOnClickListener(v -> startMainActivity());
 
         checkAgreementAndPrivacy();
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
+        if (preferences.getBoolean(KEY_HAS_ENTERED_APP, false)
+                && mAgreement && mPrivacy) {
+            mStartButton.setVisibility(View.GONE);
+            checkBox.setVisibility(View.GONE);
+            mHandler.postDelayed(mReturningLaunch, RETURNING_SPLASH_DELAY_MS);
+        }
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if (requestCode == SDK_PERMISSION_REQUEST) {
-            for (int i = 0; i < ReqPermissions.size(); i++) {
-                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
                     GoUtils.DisplayToast(this, getResources().getString(R.string.app_error_permission));
+                    showEntryControls();
                     return;
                 }
             }
             isPermission = true;
+            launchMainActivity(mMarkEnteredAfterPermission);
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
-    private void checkDefaultPermissions() {
+    private void requestPermissionsAndLaunch(boolean markEntered) {
+        ReqPermissions.clear();
+        mMarkEnteredAfterPermission = markEntered;
         // 定位精确位置
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ReqPermissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
@@ -101,22 +99,11 @@ public class WelcomeActivity extends AppCompatActivity {
             ReqPermissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
         }
 
-        /*
-         * 读写权限和电话状态权限非必要权限(建议授予)只会申请一次，用户同意或者禁止，只会弹一次
-         */
-        // 读写权限
-        if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            ReqPermissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
-        }
-
-        // 读取电话状态权限
-        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
-            ReqPermissions.add(Manifest.permission.READ_PHONE_STATE);
-        }
-
         if (ReqPermissions.isEmpty()) {
             isPermission = true;
+            launchMainActivity(markEntered);
         } else {
+            isPermission = false;
             requestPermissions(ReqPermissions.toArray(new String[0]), SDK_PERMISSION_REQUEST);
         }
     }
@@ -137,19 +124,33 @@ public class WelcomeActivity extends AppCompatActivity {
             return;
         }
 
-        if (isPermission) {
-            Intent intent = new Intent(WelcomeActivity.this, MainActivity.class);
-            startActivity(intent);
-            WelcomeActivity.this.finish();
-        } else {
-            checkDefaultPermissions();
+        requestPermissionsAndLaunch(true);
+    }
+
+    private void launchMainActivity(boolean markEntered) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (markEntered) {
+            preferences.edit().putBoolean(KEY_HAS_ENTERED_APP, true).apply();
+        }
+        Intent intent = new Intent(WelcomeActivity.this, MainActivity.class);
+        startActivity(intent);
+        finish();
+    }
+
+    private void showEntryControls() {
+        if (mStartButton != null) {
+            mStartButton.setVisibility(View.VISIBLE);
+        }
+        if (checkBox != null) {
+            checkBox.setVisibility(View.VISIBLE);
         }
     }
 
     private void doAcceptation() {
         if (mAgreement && mPrivacy) {
             checkBox.setChecked(true);
-            checkDefaultPermissions();
         } else {
             checkBox.setChecked(false);
         }
@@ -275,7 +276,6 @@ public class WelcomeActivity extends AppCompatActivity {
 
         if (mPrivacy && mAgreement) {
             checkBox.setChecked(true);
-            checkDefaultPermissions();
         } else {
             checkBox.setChecked(false);
         }
@@ -315,5 +315,11 @@ public class WelcomeActivity extends AppCompatActivity {
         int privacy_end = str.indexOf("》", agreement_end) + 1;
         builder.setSpan(clickSpanPrivacy, privacy_start, privacy_end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
         return builder;
+    }
+
+    @Override
+    protected void onDestroy() {
+        mHandler.removeCallbacks(mReturningLaunch);
+        super.onDestroy();
     }
 }

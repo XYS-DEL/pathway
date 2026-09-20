@@ -36,7 +36,7 @@
             app:summary="@string/setting_bike_default"
             app:iconSpaceReserved="false"/>
 
-        <EditTextPreference
+        <Preference
             app:key="setting_altitude"
             app:title="@string/setting_altitude"
             app:defaultValue="@string/setting_altitude_default"
