@@ -20,6 +20,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.Message;
 import android.os.Process;
 import android.os.SystemClock;
@@ -30,6 +31,9 @@ import androidx.core.app.NotificationCompat;
 import com.elvishew.xlog.XLog;
 import com.iterlocus.pathway.MainActivity;
 import com.iterlocus.pathway.R;
+import com.iterlocus.pathway.RouteGeometry;
+import com.iterlocus.pathway.RoutePlayer;
+import com.iterlocus.pathway.RouteProgress;
 import com.iterlocus.pathway.joystick.JoyStick;
 
 public class ServiceGo extends Service {
@@ -45,6 +49,13 @@ public class ServiceGo extends Service {
     private double mSpeed = 1.2;        /* 默认的速度，单位 m/s */
     private static final int HANDLER_MSG_ID = 0;
     private static final String SERVICE_GO_HANDLER_NAME = "ServiceGoLocation";
+
+    /** 单次推进的时间上限，秒。doze / GC 长暂停之后不夹住会一次跳出几百米。 */
+    private static final double MAX_TICK_SECONDS = 1.0;
+
+    /** 服务存活标志，供 MainActivity 对账 isMockServStart。 */
+    private static volatile boolean sAlive = false;
+
     private LocationManager mLocManager;
     private HandlerThread mLocHandlerThread;
     private Handler mLocHandler;
@@ -59,6 +70,14 @@ public class ServiceGo extends Service {
     // 摇杆相关
     private JoyStick mJoyStick;
 
+    /** 当前路线。null 表示没有路线在跑。定位线程读、UI 线程写，故 volatile。 */
+    private volatile RoutePlayer mRoutePlayer;
+    private volatile String mRouteName;
+    /** 上一 tick 的时刻，用于算真实的 dt。 */
+    private long mLastTickMs;
+    /** 主线程 Handler：摇杆是 View，只能在主线程碰。 */
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+
     private final ServiceGoBinder mBinder = new ServiceGoBinder();
 
     @Override
@@ -69,6 +88,10 @@ public class ServiceGo extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+
+        sAlive = true;
+        // 必须在 initGoLocation() 之前：循环的第一条消息马上就会读它
+        mLastTickMs = SystemClock.elapsedRealtime();
 
         mLocManager = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
 
@@ -99,6 +122,8 @@ public class ServiceGo extends Service {
     @Override
     public void onDestroy() {
         isStop = true;
+        sAlive = false;
+
         mLocHandler.removeMessages(HANDLER_MSG_ID);
         mLocHandlerThread.quit();
 
@@ -187,6 +212,7 @@ public class ServiceGo extends Service {
                     Thread.sleep(100);
 
                     if (!isStop) {
+                        advanceRoute();
                         setLocationNetwork();
                         setLocationGPS();
 
@@ -200,6 +226,62 @@ public class ServiceGo extends Service {
         };
 
         mLocHandler.sendEmptyMessage(HANDLER_MSG_ID);
+    }
+
+    /**
+     * 按真实经过的时间推进路线。
+     *
+     * <p>dt 必须用时钟差而不是写死的 0.1：{@code Thread.sleep(100)} 会漂，
+     * 几公里的路线上累积误差肉眼可见。上限 {@link #MAX_TICK_SECONDS} 是防
+     * doze / GC 长暂停之后一次跳出几百米——那是一条不真实的瞬移轨迹。
+     *
+     * <p>写回的是摇杆用的同一个「当前位置」单元格，所以 {@code setLocationGPS()} /
+     * {@code setLocationNetwork()} 一行都不用改。
+     *
+     * <p>到达终点后本方法只是不再推进；交还摇杆、改通知文案属于表现层，在
+     * onRouteFinished() 里做。
+     */
+    private void advanceRoute() {
+        long now = SystemClock.elapsedRealtime();
+        double dt = Math.min((now - mLastTickMs) / 1000.0, MAX_TICK_SECONDS);
+        mLastTickMs = now;
+
+        RoutePlayer player = mRoutePlayer;
+        if (player == null || player.isFinished()) {
+            return;
+        }
+
+        player.advance(dt);
+
+        double[] position = player.getPosition();
+        if (position == null) {
+            return;
+        }
+        mCurLng = position[0];
+        mCurLat = position[1];
+        mCurBea = (float) player.getBearing();
+        mSpeed = player.getSpeed();
+    }
+
+    /** 把摇杆内置地图同步到当前位置。只能在主线程碰这些 View。 */
+    private void syncJoyStickToCurrentPosition() {
+        final double lng = mCurLng;
+        final double lat = mCurLat;
+        final double alt = mCurAlt;
+        postToMain(() -> {
+            if (mJoyStick != null) {
+                mJoyStick.setCurrentPosition(lng, lat, alt);
+            }
+        });
+    }
+
+    /** 已在主线程就直接跑，否则投递过去。服务里既有 UI 线程调用也有定位线程调用。 */
+    private void postToMain(Runnable action) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action.run();
+        } else {
+            mMainHandler.post(action);
+        }
     }
 
     private void removeTestProviderGPS() {
@@ -325,6 +407,10 @@ public class ServiceGo extends Service {
 
     public class ServiceGoBinder extends Binder {
         public void setPosition(double lng, double lat, double alt) {
+            // 播放中瞬移是自相矛盾的状态：两个写入者抢同一个位置。先结束路线，
+            // 让「谁在控制位置」始终只有一个答案。
+            stopRoute();
+
             mLocHandler.removeMessages(HANDLER_MSG_ID);
             mCurLng = lng;
             mCurLat = lat;
@@ -332,6 +418,67 @@ public class ServiceGo extends Service {
             mLocHandler.sendEmptyMessage(HANDLER_MSG_ID);
             mJoyStick.setCurrentPosition(mCurLng, mCurLat, mCurAlt);
         }
+
+        /**
+         * 开始沿路线模拟。
+         *
+         * @param wgsPoints 每个元素 {@code {经度, 纬度}}，<b>WGS84</b>（调用方负责从 BD09 转换）
+         * @return 是否成功开始；点数不足 2 或总长为 0 时返回 false，不抛
+         */
+        public boolean startRoute(String routeName, double[][] wgsPoints,
+                                  boolean closed, double speedMps) {
+            if (wgsPoints == null || wgsPoints.length < RouteGeometry.MIN_POINTS_FOR_CLOSE) {
+                return false;
+            }
+            RoutePlayer player = new RoutePlayer(wgsPoints, closed, speedMps);
+            if (player.getTotalDistance() <= 0d) {
+                return false;
+            }
+
+            mRoutePlayer = player;
+            mRouteName = routeName == null ? "" : routeName;
+            // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
+            mLastTickMs = SystemClock.elapsedRealtime();
+            return true;
+        }
+
+        /** 结束路线模拟。没有路线在跑时什么也不做。 */
+        public void stopRoute() {
+            if (mRoutePlayer == null) {
+                return;
+            }
+            mRoutePlayer = null;
+            mRouteName = null;
+            syncJoyStickToCurrentPosition();
+        }
+
+        /** 播放中改速度。没有路线在跑时什么也不做。 */
+        public void setRouteSpeed(double speedMps) {
+            RoutePlayer player = mRoutePlayer;
+            if (player != null) {
+                player.setSpeed(speedMps);
+            }
+        }
+
+        /** 当前路线状态；没有路线在跑时返回 null。 */
+        public RouteProgress getRouteProgress() {
+            RoutePlayer player = mRoutePlayer;
+            if (player == null) {
+                return null;
+            }
+            return new RouteProgress(mRouteName, player.isFinished(), player.getSpeed(),
+                    player.getDistanceCovered(), player.getTotalDistance(), player.getLapCount());
+        }
+    }
+
+    /**
+     * 服务是否存活。
+     *
+     * <p>供 {@code MainActivity} 对账 {@code isMockServStart}——模拟界面也能独立启动本服务，
+     * 那个 Activity 私有字段会因此陈旧。顺带修掉「服务被系统杀死后字段仍是 true」的既有隐患。
+     */
+    public static boolean isAlive() {
+        return sAlive;
     }
 }
 
