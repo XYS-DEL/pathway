@@ -200,9 +200,9 @@ public class ServiceGo extends Service {
         //准备intent
         Intent clickIntent = new Intent(this, MainActivity.class);
         PendingIntent clickPI = PendingIntent.getActivity(this, 1, clickIntent, PendingIntent.FLAG_IMMUTABLE);
-        // setPackage：把这两个广播收成「只发给本包」。不设的话它们是隐式广播，
-        // 本 App 自己发出去的 ShowJoyStick/HideJoyStick 也会被别的 App 注册的同名
-        // receiver 收走。注意这**只约束发送侧**——见下面 onReceive 处关于收信侧的说明。
+        // setPackage：把通知栏里这几个广播都收成「只发给本包」。不设的话它们是隐式广播，
+        // 本 App 自己发出去的同名广播也会被别的 App 注册的 receiver 收走。
+        // 注意这**只约束发送侧**——见下面 onReceive 处关于收信侧的说明。
         Intent showIntent = new Intent(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW);
         showIntent.setPackage(getPackageName());
         PendingIntent showPendingPI = PendingIntent.getBroadcast(this, 0, showIntent, PendingIntent.FLAG_IMMUTABLE);
@@ -233,6 +233,9 @@ public class ServiceGo extends Service {
 
         if (player != null) {
             Intent stopIntent = new Intent(SERVICE_GO_NOTE_ACTION_ROUTE_STOP);
+            // 与上面两个同样收成只发给本包。这一个尤其不能漏：伪造的 StopRoute 能直接停掉
+            // 正在跑的路线，比伪造摇杆可见性更糟——而它原先恰恰是唯一没设 setPackage 的。
+            stopIntent.setPackage(getPackageName());
             // 请求码与上面两个错开；即便 action 已经不同，也别复用同一个码
             PendingIntent stopPendingPI = PendingIntent.getBroadcast(this, 3, stopIntent, PendingIntent.FLAG_IMMUTABLE);
             builder.addAction(new NotificationCompat.Action(null,
@@ -622,12 +625,13 @@ public class ServiceGo extends Service {
             // 路线，伪造的 Show/HideJoyStick 会改写 mJoyStickDesiredVisible（用户的可见性意愿）。
             // 这是既有问题（本次只把它放大了）。
             //
-            // 今天（compileSdk 32）没有可用的公开 API 去核对发送方，三条路都要先把 compileSdk 抬上去：
+            // 今天（compileSdk 32）**没有可用的公开 API 去核对发送方**。收口的办法有三条，
+            // 前两条要抬 compileSdk，第三条不用：
             //   1) BroadcastReceiver.getSentFromUid() 比对 Process.myUid()——平台自己的
             //      api-versions.xml 标着 **since API 34**。注意它的 javadoc：receiver 拿不到发送方
             //      身份时返回 Process.INVALID_UID，那种情况怎么判要单独定（现在用不了，不用急）。
             //   2) Context.RECEIVER_NOT_EXPORTED（最干净，但 **API 33** 才有）。
-            //   3) 给 registerReceiver 传接收方权限（**API 1 就有**，不用抬 compileSdk），
+            //   3) 给 registerReceiver 传接收方权限（**API 1 就有，这条不用抬 compileSdk**），
             //      但必须先实测确认 PendingIntent.getBroadcast 发出的广播带着本 App 的身份、
             //      过得了这道权限——否则是把一个低危漏洞换成一个静默失效的通知按钮，
             //      而这件事读文档定不了。
@@ -695,6 +699,11 @@ public class ServiceGo extends Service {
          * 按三档速度（1.2 / 3.6 / 10.0 m/s）算约 0.12 / 0.36 / 1.0 米。步行那档不足 0.15 米，
          * 标在地图上肉眼看不出来，但这只是「量小」，不是「原子」。要真的原子，得把两个值并进
          * 一个不可变对象一起发布（或让读取方拿一次快照对象），本次没做。
+         *
+         * <p><b>那个界只对定位循环这个写者成立。</b> 同一对字段还有第二个写者
+         * {@link ServiceGoBinder#setPosition(double, double, double)}（瞬移），它一次可以移动任意远，
+         * 所以**跨过一次瞬移的读不受「一个 tick」约束**。这不是缺陷（瞬移本来就该跳很远），
+         * 只是别把这个界当成对所有情况都成立。
          *
          * <p>不做任何换算——调用方要画到百度地图上，自己走 {@code MapUtils.wgs2bd09}。
          */

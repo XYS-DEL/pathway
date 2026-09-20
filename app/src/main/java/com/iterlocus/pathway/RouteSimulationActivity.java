@@ -624,7 +624,13 @@ public class RouteSimulationActivity extends BaseActivity {
                                 if (observer.isAlive()) {
                                     observer.removeOnGlobalLayoutListener(this);
                                 }
-                                fitCameraNow(points, false);
+                                // 重投时**重新按当前选中取点**，不用捕获下来的那一份：
+                                // 从投递失败到这次布局之间用户可能已经改了选中项，
+                                // 拿旧路线的包围盒去框、画出来的却是新折线。
+                                List<LatLng> current = selectedDisplayPoints();
+                                if (current != null) {
+                                    fitCameraNow(current, false);
+                                }
                             }
                         });
                 return;
