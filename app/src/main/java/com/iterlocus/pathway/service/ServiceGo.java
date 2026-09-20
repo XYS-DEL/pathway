@@ -37,6 +37,8 @@ import com.iterlocus.pathway.RouteProgress;
 import com.iterlocus.pathway.joystick.JoyStick;
 
 public class ServiceGo extends Service {
+    public static final String EXTRA_SUPPRESS_JOYSTICK =
+            "com.iterlocus.pathway.extra.SUPPRESS_JOYSTICK";
     // 定位相关变量
     public static final double DEFAULT_LAT = 36.667662;
     public static final double DEFAULT_LNG = 117.027707;
@@ -80,19 +82,14 @@ public class ServiceGo extends Service {
     // 摇杆相关
     private JoyStick mJoyStick;
 
-    /**
-     * 用户希望的摇杆可见性，初值为 true（{@link #initJoyStick()} 起来就 {@code show()}）。
-     *
-     * <p>播放期间这个字段<b>不变</b>，只是被临时压住——播放结束 / 到达时按它恢复。
-     * 通知栏有「隐藏摇杆」，用户可能本来就把它关了；结束时<b>不许</b>强行弹回来。
-     * 反过来，用户在播放期间显式点了「显示摇杆」，那也是他的意愿，要记下来，
-     * 否则播放一结束又会被按旧意愿收回去。
-     */
+    /** 用户希望的摇杆可见性；路线开始和结束都会置 false，避免结束路线时自动弹出。 */
     private volatile boolean mJoyStickDesiredVisible = true;
 
-    /** 当前路线。null 表示没有路线在跑。定位线程读、UI 线程写，故 volatile。 */
+    /** 当前路线。null 表示没有路线。定位线程读、UI 线程写，故 volatile。 */
     private volatile RoutePlayer mRoutePlayer;
     private volatile String mRouteName;
+    private volatile boolean mRoutePaused;
+    private volatile double mRouteSpeedBeforePause;
     /** 上一 tick 的时刻，用于算真实的 dt。主线程写（onCreate / startRoute）、定位线程读写，故 volatile。 */
     private volatile long mLastTickMs;
     /** 主线程 Handler：摇杆是 View，只能在主线程碰。 */
@@ -143,6 +140,10 @@ public class ServiceGo extends Service {
             mCurLng = intent.getDoubleExtra(MainActivity.LNG_MSG_ID, DEFAULT_LNG);
             mCurLat = intent.getDoubleExtra(MainActivity.LAT_MSG_ID, DEFAULT_LAT);
             mCurAlt = intent.getDoubleExtra(MainActivity.ALT_MSG_ID, DEFAULT_ALT);
+            if (intent.getBooleanExtra(EXTRA_SUPPRESS_JOYSTICK, false)) {
+                mJoyStickDesiredVisible = false;
+                mJoyStick.hide();
+            }
         }
 
         mJoyStick.setCurrentPosition(mCurLng, mCurLat, mCurAlt);
@@ -216,10 +217,12 @@ public class ServiceGo extends Service {
         String text;
         if (player == null) {
             text = getResources().getString(R.string.app_service_tips);
+        } else if (player.isFinished()) {
+            text = getResources().getString(R.string.app_route_arrived);
+        } else if (mRoutePaused) {
+            text = getResources().getString(R.string.app_route_paused);
         } else {
-            text = getResources().getString(player.isFinished()
-                    ? R.string.app_route_arrived
-                    : R.string.app_route_playing);
+            text = getResources().getString(R.string.app_route_playing);
         }
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, SERVICE_GO_NOTE_CHANNEL_ID)
@@ -309,16 +312,9 @@ public class ServiceGo extends Service {
         mJoyStick.show();
     }
 
-    /**
-     * 路线是否正在走。到达终点后为 false——那时位置不再被引擎推进，
-     * 用户「站」在终点，摇杆要能继续用（设计文档：播放结束（用户结束 / 到达终点）
-     * 时摇杆恢复可用）。所以判据是「在走」而不是「非 null」：仅凭
-     * {@code mRoutePlayer != null} 会在「已到达、等待用户结束」这个合法状态下
-     * 把摇杆变成一个看得见、拖不动的死控件。
-     */
+    /** 路线是否仍处于模拟会话。到达终点或暂停时路线仍存在，摇杆都必须保持禁用。 */
     private boolean isRoutePlaying() {
-        RoutePlayer player = mRoutePlayer;
-        return player != null && !player.isFinished();
+        return mRoutePlayer != null;
     }
 
     /**
@@ -343,10 +339,8 @@ public class ServiceGo extends Service {
      * 0.4 是不够的——那只是变淡，仍然占着屏幕。
      *
      * <p>「禁用」那一层（{@link #refreshJoyStickInputEnabled()} 与
-     * {@code JoyStick.setInputEnabled}）因此<b>保留不删</b>：通知栏的「显示摇杆」随时
-     * 能把摇杆叫出来，那时它必须呈现为变灰且拖不动，而不是不透明却拖不动。
-     * {@code JoyStick.show()} 自己会先调 {@code applyInputEnabledVisual()}，
-     * 所以中途叫出来的那一个自然是灰的，这里不必再补一次。
+     * {@code JoyStick.setInputEnabled}）仍保留，避免已进入处理流程的触摸事件越过隐藏边界；
+     * 通知栏的「显示摇杆」在路线存在期间也会被拒绝。
      *
      * <p>与 {@link #refreshJoyStickInputEnabled()} 同一个模式：投递出去、由任务自己
      * 重新求值，所以即使投递被主线程的 {@code startRoute()} 插到中间，后到的那次
@@ -382,18 +376,17 @@ public class ServiceGo extends Service {
     }
 
     /**
-     * 到达终点：位置停在末点、速度与航向归零，摇杆交还用户，通知改文案。
+     * 到达终点：位置停在末点、速度与航向归零，摇杆继续禁用并隐藏，通知改文案。
      *
      * <p>运行在定位线程上，三件事全部走 {@link #postToMain}；而且它们都在**执行时**
      * 重读 {@code mRoutePlayer}，所以即使这三次投递被主线程上的一次
      * {@code startRoute()} 插到中间，后到的那次也会算出对新路线正确的状态。
      */
     private void onRouteFinished() {
-        // 复位放在最前、也就是交还摇杆之前。到达是**终止态**：路线不再推进，位置就静止了，
+        // 到达是**终止态**：路线不再推进，位置就静止了，
         // 而 mSpeed / mCurBea 会继续被 setLocationGPS/Network 上报——静止位置配着最后一段的
         // 10 m/s 与旧航向，正是目标 App 可以据以识别的破绽；且它比 stopRoute() 那条挂得更久
-        // （要一直挂到用户手动结束）。放在 refreshJoyStickInputEnabled() 之前，是为了让复位
-        // 先于「用户可以拖摇杆」发生：投递带 happens-before，摇杆随后写的值不会被这里盖掉。
+        // （要一直挂到用户手动结束）。
         mSpeed = 0d;
         mCurBea = DEFAULT_BEA;
         syncJoyStickToCurrentPosition();
@@ -442,7 +435,7 @@ public class ServiceGo extends Service {
      * <p>写回的是摇杆用的同一个「当前位置」单元格，所以 {@code setLocationGPS()} /
      * {@code setLocationNetwork()} 一行都不用改。
      *
-     * <p>到达终点后本方法只是不再推进；交还摇杆、改通知文案属于表现层，在
+     * <p>到达终点后本方法只是不再推进；保持摇杆禁用、改通知文案属于表现层，在
      * onRouteFinished() 里做。
      */
     private void advanceRoute() {
@@ -646,9 +639,10 @@ public class ServiceGo extends Service {
             String action = intent.getAction();
             if (action != null) {
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW)) {
-                    // 播放期间也照样显示：这是用户的显式要求（他要看摇杆内置地图上的当前位置），
-                    // 只是那时摇杆是灰的、拖不动。同时把意愿记下来，否则播放一结束，
-                    // 恢复逻辑会按旧意愿把它收回去，用户刚叫出来的摇杆又没了。
+                    // 路线存在期间完全禁用摇杆；结束路线后保持隐藏，避免结束按钮触发自动弹出。
+                    if (mRoutePlayer != null) {
+                        return;
+                    }
                     mJoyStickDesiredVisible = true;
                     mJoyStick.show();
                 }
@@ -659,7 +653,7 @@ public class ServiceGo extends Service {
                 }
 
                 // 走 binder 而不是直接改字段：stopRoute 里那一套（复检配合的置 null、
-                // 摇杆交还、通知回收）必须整段跑，不能在这里抄一遍
+                // 摇杆保持隐藏、通知回收）必须整段跑，不能在这里抄一遍
                 if (action.equals(SERVICE_GO_NOTE_ACTION_ROUTE_STOP)) {
                     mBinder.stopRoute();
                 }
@@ -748,6 +742,9 @@ public class ServiceGo extends Service {
             // 先看 mRoutePlayer 再看 mRouteName），而 volatile 只对它**之前**的写给出 release
             // 语义——反过来写，读者可能拿到新 player 配旧名字或空名字。
             mRouteName = routeName == null ? "" : routeName;
+            mRoutePaused = false;
+            mRouteSpeedBeforePause = Math.max(0d, speedMps);
+            mJoyStickDesiredVisible = false;
             mRoutePlayer = player;
             // 归零基准时刻，否则第一帧会带上「上次 tick 到现在」的整段间隔
             mLastTickMs = SystemClock.elapsedRealtime();
@@ -770,25 +767,58 @@ public class ServiceGo extends Service {
             // （selectRowByName 对空名字早退），而不是把旧名字配到另一条路线上。
             mRouteName = null;
             mRoutePlayer = null;
+            mRoutePaused = false;
+            mRouteSpeedBeforePause = 0d;
+            mJoyStickDesiredVisible = false;
             // 速度与航向随路线一起复位：路线结束了，位置就静止了，而这两个值会继续被
             // setLocationGPS/Network 上报。静止位置配 10 m/s 与最后一段的航向，正是目标 App
             // 可以据以识别的破绽。航向取 0（DEFAULT_BEA）：静止时它没有意义，真机静止历元里
             // 即便有值也是噪声，0 是最不容易被读成异常的那个取值。
             mSpeed = 0d;
             mCurBea = DEFAULT_BEA;
-            // 表现层：摇杆按用户意愿回到屏幕上（播放前关掉的就保持关着）、通知退回
-            // 「服务正在运行中」。放在置 null 之后——两者都在执行时重读 mRoutePlayer
+            // 表现层：摇杆保持隐藏、输入恢复待命，通知退回「服务正在运行中」。
+            // 放在置 null 之后——两者都在执行时重读 mRoutePlayer。
             refreshJoyStickInputEnabled();
             refreshJoyStickVisibility();
             updateNotification();
             syncJoyStickToCurrentPosition();
         }
 
+        /** 暂停路线，位置保持不变，摇杆仍然不可用。 */
+        public void pauseRoute() {
+            RoutePlayer player = mRoutePlayer;
+            if (player == null || player.isFinished() || mRoutePaused) {
+                return;
+            }
+            mRouteSpeedBeforePause = player.getSpeed();
+            player.setSpeed(0d);
+            mSpeed = 0d;
+            mRoutePaused = true;
+            updateNotification();
+        }
+
+        /** 继续路线，恢复暂停前的速度。 */
+        public void resumeRoute() {
+            RoutePlayer player = mRoutePlayer;
+            if (player == null || player.isFinished() || !mRoutePaused) {
+                return;
+            }
+            double speed = mRouteSpeedBeforePause;
+            player.setSpeed(speed);
+            mSpeed = speed;
+            mRoutePaused = false;
+            updateNotification();
+        }
+
         /** 播放中改速度。没有路线在跑时什么也不做。 */
         public void setRouteSpeed(double speedMps) {
             RoutePlayer player = mRoutePlayer;
             if (player != null) {
-                player.setSpeed(speedMps);
+                if (mRoutePaused) {
+                    mRouteSpeedBeforePause = Math.max(0d, speedMps);
+                } else {
+                    player.setSpeed(speedMps);
+                }
             }
         }
 
@@ -798,7 +828,7 @@ public class ServiceGo extends Service {
             if (player == null) {
                 return null;
             }
-            return new RouteProgress(mRouteName, player.isFinished(), player.getSpeed(),
+            return new RouteProgress(mRouteName, player.isFinished(), mRoutePaused, player.getSpeed(),
                     player.getDistanceCovered(), player.getTotalDistance(), player.getLapCount());
         }
     }

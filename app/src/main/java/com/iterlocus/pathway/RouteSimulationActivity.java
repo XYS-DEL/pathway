@@ -25,6 +25,9 @@ import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
 import androidx.preference.PreferenceManager;
 
+import com.acooldog.nfc.NfcPayload;
+import com.acooldog.nfc.NfcPayloadDispatchResult;
+import com.acooldog.nfc.NfcSender;
 import com.baidu.mapapi.map.BaiduMap;
 import com.baidu.mapapi.map.BitmapDescriptorFactory;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
@@ -75,6 +78,7 @@ public class RouteSimulationActivity extends BaseActivity {
 
     /** 系统重建时存/取选中行。行序取自 DataBaseRoute.queryAll（按创建时间倒序），是稳定的。 */
     private static final String STATE_SELECTED_INDEX = "STATE_SELECTED_INDEX";
+    private static final String PREF_LAST_ROUTE_NAME = "route_sim_last_route_name";
     /** 折叠态也跨重建保持，否则每次旋转面板都自己弹回来。 */
     private static final String STATE_PANEL_COLLAPSED = "STATE_PANEL_COLLAPSED";
 
@@ -111,6 +115,7 @@ public class RouteSimulationActivity extends BaseActivity {
 
     private TextView mStatusText;
     private TextView mPrimaryButton;
+    private TextView mPauseButton;
     private TextView mPickButton;
     private TextView mToggleButton;
     private View mPanelBody;
@@ -190,6 +195,7 @@ public class RouteSimulationActivity extends BaseActivity {
 
         mStatusText = findViewById(R.id.route_sim_status);
         mPrimaryButton = findViewById(R.id.route_sim_primary);
+        mPauseButton = findViewById(R.id.route_sim_pause);
         mPickButton = findViewById(R.id.route_sim_pick);
         mToggleButton = findViewById(R.id.route_sim_toggle);
         mPanelBody = findViewById(R.id.route_sim_body);
@@ -207,6 +213,7 @@ public class RouteSimulationActivity extends BaseActivity {
         mSpeedGroup.setOnCheckedChangeListener((group, checkedId) -> onSpeedChipChanged(checkedId));
 
         mPrimaryButton.setOnClickListener(v -> onPrimaryClicked());
+        mPauseButton.setOnClickListener(v -> onPauseClicked());
 
         loadRoutes();
     }
@@ -387,6 +394,10 @@ public class RouteSimulationActivity extends BaseActivity {
             mSelectedIndex = -1;
         }
 
+        if (mSelectedIndex < 0) {
+            selectRowByName(mPreferences.getString(PREF_LAST_ROUTE_NAME, ""));
+        }
+
         mPrimaryButton.setEnabled(!mRows.isEmpty());
         updatePickButtonText();
         updateMapForSelection();
@@ -440,6 +451,8 @@ public class RouteSimulationActivity extends BaseActivity {
             return;
         }
         mSelectedIndex = index;
+        mPreferences.edit().putString(
+                PREF_LAST_ROUTE_NAME, mRows.get(index).config.getName()).apply();
         onSelectionChanged();
     }
 
@@ -791,6 +804,19 @@ public class RouteSimulationActivity extends BaseActivity {
         }
     }
 
+    private void onPauseClicked() {
+        RouteProgress progress = currentProgress();
+        if (progress == null || mServiceBinder == null || progress.isFinished()) {
+            return;
+        }
+        if (progress.isPaused()) {
+            mServiceBinder.resumeRoute();
+        } else {
+            mServiceBinder.pauseRoute();
+        }
+        refreshProgress();
+    }
+
     private RouteProgress currentProgress() {
         return mServiceBinder == null ? null : mServiceBinder.getRouteProgress();
     }
@@ -827,6 +853,7 @@ public class RouteSimulationActivity extends BaseActivity {
         // 会用它们初始化位置单元格，不传就落到 DEFAULT_LAT/DEFAULT_LNG（36.66, 117.03），
         // 界面会先闪一下那个坐标才被路线第一帧覆盖。
         Intent intent = new Intent(this, ServiceGo.class);
+        intent.putExtra(ServiceGo.EXTRA_SUPPRESS_JOYSTICK, true);
         if (row.wgsPoints.length > 0) {
             intent.putExtra(MainActivity.LNG_MSG_ID, row.wgsPoints[0][0]);
             intent.putExtra(MainActivity.LAT_MSG_ID, row.wgsPoints[0][1]);
@@ -866,10 +893,10 @@ public class RouteSimulationActivity extends BaseActivity {
             GoUtils.showDisableWifiDialog(this);
         }
 
-        // 卡片带了链接就跳过去。**放在最后、且只在真的开起来之后**：URL 打不开时模拟
+        // 卡片带了链接就跳过去。**放在最后、且只在真的开起来之后**：目标应用打不开时模拟
         // 已经跑起来了，那正是有用的结果，所以下面失败只提示、不回滚。
         // 顺序也是刻意的：先把 WiFi 那条警告挂上，用户从目标 App 回来时还看得见它。
-        openCardUrl();
+        sendCardPayload();
 
         refreshProgress();
     }
@@ -877,25 +904,42 @@ public class RouteSimulationActivity extends BaseActivity {
     /*===== 跳到卡片上的链接 =====*/
 
     /**
-     * 打开 NFC 卡片上的 URL，没有就什么都不做。
+     * 把 NFC 卡片内容作为伪 NDEF 事件发给目标应用，没有卡片内容就什么都不做。
      *
      * <p>从侧滑菜单进来时 {@code EXTRA_CARD_URL} 是空的，走纯模拟路径，行为与从前一致；
-     * 只有卡片带了链接才跳。卡片上另外两个字段（包名 / source）不参与跳转，只供显示。
+     * 只有卡片带了链接才跳。带包名时使用 {@link NfcSender} 发送 URI Record + AAR，
+     * 让目标应用按真实 NFC 发现事件处理，而不是只发送普通 URL Intent。
      *
-     * <p>这只是普通的外部跳转（{@code ACTION_VIEW}）。{@code :nfc} 模块里的
-     * {@code NfcSender} 是伪造贴卡广播（{@code ACTION_NDEF_DISCOVERED} + {@code setPackage}），
-     * 本项目明确不使用，这里与它无关，也不要接。
-     *
-     * <p>失败（没有能处理这个 URL 的 App、格式不对）只记日志加提示，**不回滚已经开始的
+     * <p>NfcSender 内部先尝试 {@code ACTION_NDEF_DISCOVERED}，失败后回退到指定包名和通用的
+     * {@code ACTION_VIEW}。失败（目标应用未安装、没有匹配 Activity 或格式不对）只记日志加提示，**不回滚已经开始的
      * 模拟**：那才是有用的结果。
      */
-    private void openCardUrl() {
+    private void sendCardPayload() {
         String url = getIntent().getStringExtra(EXTRA_CARD_URL);
         if (isEmpty(url)) {
             return;
         }
+
+        String packageName = getIntent().getStringExtra(EXTRA_CARD_PACKAGE);
+        String source = getIntent().getStringExtra(EXTRA_SOURCE);
+        if (isEmpty(packageName)) {
+            // 没有 AAR 包名时无法伪造定向 NFC 事件，保留普通 URL 的兼容路径。
+            openCardUrl(url);
+            return;
+        }
+
+        NfcPayloadDispatchResult result = NfcSender.send(
+                this, new NfcPayload(url, packageName, source));
+        if (!result.isSuccessful()) {
+            XLog.e("ROUTE_SIM: ERROR - sendCardPayload: " + result.getDetail());
+            GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_open_url_failed));
+        }
+    }
+
+    private void openCardUrl(String url) {
         try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            startActivity(intent);
         } catch (Exception e) {
             // Uri.parse 本身不抛，失败发生在 startActivity 找不到接收方时
             // （ActivityNotFoundException 等）。按项目约定记日志后降级。
@@ -930,12 +974,21 @@ public class RouteSimulationActivity extends BaseActivity {
         if (progress == null) {
             mStatusText.setText(R.string.route_sim_status_idle);
             mPrimaryButton.setText(R.string.route_sim_start);
+            mPauseButton.setVisibility(View.GONE);
             // 没有路线在跑，可以随便换；库是空的就置灰
             mPickButton.setEnabled(!mRows.isEmpty());
             return;
         }
 
         mPrimaryButton.setText(R.string.route_sim_stop);
+        if (progress.isFinished()) {
+            mPauseButton.setVisibility(View.GONE);
+        } else {
+            mPauseButton.setVisibility(View.VISIBLE);
+            mPauseButton.setText(progress.isPaused()
+                    ? R.string.route_sim_resume
+                    : R.string.route_sim_pause);
+        }
 
         // 播放中（含已到达、等用户结束）不许换路线。错误处理表里那条规则就是
         // 「不能直接切，先结束再开始」；不置灰的话，弹窗会让人选，而 500ms 后的
@@ -945,13 +998,18 @@ public class RouteSimulationActivity extends BaseActivity {
 
         // 系统重建后靠这里把选中行与档位对回去
         selectRowByName(progress.getRouteName());
-        if (Math.abs(mSelectedSpeed - progress.getSpeed()) > 0.01d) {
+        if (!progress.isPaused() && Math.abs(mSelectedSpeed - progress.getSpeed()) > 0.01d) {
             mSelectedSpeed = progress.getSpeed();
             applySpeedSelection();
         }
 
         if (progress.isFinished()) {
             mStatusText.setText(R.string.route_sim_status_arrived);
+            return;
+        }
+
+        if (progress.isPaused()) {
+            mStatusText.setText(R.string.route_sim_status_paused);
             return;
         }
 

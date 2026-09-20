@@ -3,8 +3,8 @@ package com.iterlocus.pathway;
 /**
  * 路线模拟的状态快照。不可变；同一进程内经由 binder 传递，不需要 {@code Parcelable}。
  *
- * <p>三种状态由「是否为 null」加 {@link #isFinished()} 表达：{@code null} = 没有路线在跑；
- * 非 null 且未 finished = 模拟中；非 null 且 finished = 已到达终点，等待用户结束。
+ * <p>状态由「是否为 null」、{@link #isPaused()} 与 {@link #isFinished()} 表达：{@code null} = 没有路线在跑；
+ * 非 null 且 paused = 已暂停；非 null 且未 paused/finished = 模拟中；非 null 且 finished = 已到达终点。
  *
  * <p>{@link #getDistanceCovered()} 是<b>本圈</b>已走距离，闭合路线每绕完一圈归零。
  * 界面靠 {@link #getLapCount()} 把这次归零解释清楚，否则用户会当成进度跳回 0 的 bug。
@@ -13,15 +13,17 @@ public final class RouteProgress {
 
     private final String mRouteName;
     private final boolean mFinished;
+    private final boolean mPaused;
     private final double mSpeed;
     private final double mDistanceCovered;
     private final double mTotalDistance;
     private final int mLapCount;
 
-    public RouteProgress(String routeName, boolean finished, double speed,
+    public RouteProgress(String routeName, boolean finished, boolean paused, double speed,
                          double distanceCovered, double totalDistance, int lapCount) {
         mRouteName = routeName == null ? "" : routeName;
         mFinished = finished;
+        mPaused = paused;
         mSpeed = speed;
         mDistanceCovered = distanceCovered;
         mTotalDistance = totalDistance;
@@ -41,6 +43,11 @@ public final class RouteProgress {
     /** m/s */
     public double getSpeed() {
         return mSpeed;
+    }
+
+    /** true = 路线存在但当前暂停。 */
+    public boolean isPaused() {
+        return mPaused;
     }
 
     /** 本圈已走，米。 */

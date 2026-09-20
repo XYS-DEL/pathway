@@ -25,7 +25,7 @@ import com.iterlocus.pathway.utils.ShareUtils;
 import java.util.List;
 
 /**
- * NFC 位置卡：读卡，把卡片上的 URL 与包名显示出来，再原样交接给模拟路线界面。
+ * 读取 NFC：把卡片上的 URL 与包名显示出来，再原样交接给模拟路线界面。
  *
  * <p>本界面<b>不做任何解析</b>——不提取坐标、不换算坐标系。卡片内容怎么解释、
  * 用来做什么，全部是 {@link RouteSimulationActivity} 的事。
@@ -62,6 +62,12 @@ public class NfcCardActivity extends BaseActivity {
         }
 
         mConfigStore = new NfcConfigStore(this);
+        NfcPayload lastPayload = mConfigStore.getLastPayload();
+        if (!lastPayload.isEmpty()) {
+            mUrl = lastPayload.getUrl();
+            mPackageName = lastPayload.getPackageName();
+            mSource = lastPayload.getSource();
+        }
 
         mStatusText = findViewById(R.id.nfc_status_text);
         mGoSettingsBtn = findViewById(R.id.nfc_go_settings);

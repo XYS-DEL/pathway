@@ -147,9 +147,9 @@
     <string name="app_dialog_confirm">确定</string>
     <string name="app_dialog_cancel">取消</string>
 
-    <!-- NFC 位置卡 -->
-    <string name="app_nfc_card">NFC 位置卡</string>
-    <string name="nav_menu_nfc_card">NFC 位置卡</string>
+    <!-- 读取 NFC -->
+    <string name="app_nfc_card">读取NFC</string>
+    <string name="nav_menu_nfc_card">读取NFC</string>
     <string name="nfc_card_status_ready">NFC 已就绪，把卡片贴到手机背面</string>
     <string name="nfc_card_status_disabled">NFC 未开启</string>
     <string name="nfc_card_status_no_hardware">本机没有 NFC 硬件</string>
@@ -176,9 +176,10 @@
     <string name="nfc_card_share_empty">尚无内容可共享</string>
     <string name="nfc_card_share_package_absent">（无包名）</string>
 
-    <!-- 模拟路线（界面已实现：选路线、档位、开始 / 结束模拟） -->
+    <!-- 模拟路线 -->
     <string name="app_route_simulation">模拟路线</string>
     <string name="app_route_playing">正在模拟路线</string>
+    <string name="app_route_paused">路线模拟已暂停</string>
     <string name="app_route_arrived">已到达终点</string>
     <string name="note_route_stop">结束路线</string>
     <!-- 刻意保留的死字符串，不是未完成功能的残留：留着是为了必要时能退回占位版，
@@ -196,12 +197,15 @@
     <string name="route_sim_speed_bike">骑行</string>
     <string name="route_sim_start">开始模拟</string>
     <string name="route_sim_stop">结束路线</string>
+    <string name="route_sim_pause">暂停模拟</string>
+    <string name="route_sim_resume">继续模拟</string>
     <string name="route_sim_need_selection">请先选一条路线</string>
     <string name="route_sim_start_failed">这条路线无法模拟（点数不足或长度为零）</string>
     <string name="route_sim_bind_failed">无法连接到模拟服务，请重试</string>
     <string name="route_sim_status_idle">未开始</string>
     <string name="route_sim_status_arrived">已到达终点</string>
     <string name="route_sim_status_playing">模拟中 · 已走 %1$s / %2$s</string>
+    <string name="route_sim_status_paused">已暂停 · 位置保持不变</string>
     <string name="route_sim_status_playing_lap">模拟中 · 第 %1$d 圈 · 本圈 %2$s / %3$s</string>
     <string name="route_sim_meters">%1$d 米</string>
     <string name="route_sim_kilometers">%1$.1f 公里</string>
@@ -214,7 +218,23 @@
     <!-- 绘制路线 -->
     <string name="app_route_draw">绘制路线</string>
     <string name="nav_menu_route_draw">绘制路线</string>
+    <string name="app_route_history">历史路线</string>
+    <string name="nav_menu_route_history">历史路线</string>
     <string name="nav_menu_route_sim">模拟路线</string>
+    <string name="route_history_empty">还没有保存过路线，请先绘制一条路线</string>
+    <string name="route_history_load_failed">路线列表加载失败</string>
+    <string name="route_history_item_meta">%1$d 点 · %2$s</string>
+    <string name="route_history_edit_named">编辑路线 %1$s</string>
+    <string name="route_history_delete_named">删除路线 %1$s</string>
+    <string name="route_history_delete_title">删除路线</string>
+    <string name="route_history_delete_message">确定删除“%1$s”吗？此操作无法撤销。</string>
+    <string name="route_history_delete_confirm">删除</string>
+    <string name="route_history_delete_ok">路线已删除</string>
+    <string name="route_history_delete_failed">删除失败，请重试</string>
+    <string name="route_history_missing">这条路线已不存在</string>
+    <string name="route_history_edit_title">编辑：%1$s</string>
+    <string name="route_history_save_edit_title">保存路线修改</string>
+    <string name="route_history_update_ok">路线已更新</string>
     <string name="route_draw_mode_point">点绘制</string>
     <string name="route_draw_mode_line">线绘制</string>
     <string name="route_draw_lock_map">锁定地图</string>

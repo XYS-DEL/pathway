@@ -180,6 +180,22 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/route_sim_pause"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_tool_chip"
+                android:clickable="true"
+                android:elevation="4dp"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="@string/route_sim_pause"
+                android:textColor="@color/chip_text"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <TextView
                 android:id="@+id/route_sim_content"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

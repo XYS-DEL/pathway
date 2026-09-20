@@ -14,11 +14,15 @@
             android:title="@string/nav_menu_nfc_card" />
         <item
             android:id="@+id/nav_route_draw"
-            android:icon="@drawable/ic_menu_nfc"
+            android:icon="@drawable/ic_menu_route_draw"
             android:title="@string/nav_menu_route_draw" />
         <item
+            android:id="@+id/nav_route_history"
+            android:icon="@drawable/ic_menu_route_history"
+            android:title="@string/nav_menu_route_history" />
+        <item
             android:id="@+id/nav_route_sim"
-            android:icon="@drawable/ic_menu_nfc"
+            android:icon="@drawable/ic_menu_route_sim"
             android:title="@string/nav_menu_route_sim" />
     </group>
     

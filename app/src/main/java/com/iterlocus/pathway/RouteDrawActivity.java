@@ -26,6 +26,7 @@ import com.baidu.mapapi.map.MapStatus;
 import com.baidu.mapapi.map.MapStatusUpdateFactory;
 import com.baidu.mapapi.map.MapView;
 import com.baidu.mapapi.model.LatLng;
+import com.baidu.mapapi.model.LatLngBounds;
 import com.baidu.mapapi.search.sug.SuggestionResult;
 import com.baidu.mapapi.search.sug.SuggestionSearch;
 import com.baidu.mapapi.search.sug.SuggestionSearchOption;
@@ -42,6 +43,8 @@ import java.util.List;
  * <p>这是<b>绘制</b>，不是模拟。开始模拟、沿路线移动都在后续的线路模拟功能里。
  */
 public class RouteDrawActivity extends BaseActivity {
+
+    public static final String EXTRA_EDIT_ROUTE_NAME = "EXTRA_EDIT_ROUTE_NAME";
 
     /**
      * 密化一次能新增的点数上限。
@@ -71,6 +74,8 @@ public class RouteDrawActivity extends BaseActivity {
     private boolean mSatellite;
 
     private SQLiteDatabase mRouteDb;
+    /** 非空表示正在原地编辑已有路线，保存时更新该行而不是新增。 */
+    private String mEditingOriginalName;
 
     /** 只在进入界面时取一次位置，把地图居中；拿到就停。 */
     private LocationClient mLocClient;
@@ -139,7 +144,9 @@ public class RouteDrawActivity extends BaseActivity {
         applyMapGestures(true);
         mOverlay.setDrawEnabled(true);
 
-        centerOnCurrentLocation();
+        if (!loadRouteForEdit()) {
+            centerOnCurrentLocation();
+        }
 
         findViewById(R.id.route_draw_btn_densify).setOnClickListener(v -> showDensifyDialog());
         findViewById(R.id.route_draw_btn_undo).setOnClickListener(v -> undo());
@@ -419,6 +426,52 @@ public class RouteDrawActivity extends BaseActivity {
         }
     }
 
+    /** 载入历史路线供继续编辑；没有编辑参数时返回 false。 */
+    private boolean loadRouteForEdit() {
+        String routeName = getIntent().getStringExtra(EXTRA_EDIT_ROUTE_NAME);
+        if (routeName == null || routeName.trim().isEmpty()) {
+            return false;
+        }
+        RouteConfig route = DataBaseRoute.queryByName(mRouteDb, routeName);
+        if (route == null) {
+            GoUtils.DisplayToast(this, getString(R.string.route_history_missing));
+            finish();
+            return true;
+        }
+
+        mEditingOriginalName = route.getName();
+        setTitle(getString(R.string.route_history_edit_title, route.getName()));
+        mOverlay.setPoints(route.getPoints());
+        mOverlay.setClosed(route.isClosed());
+        mUndoStack.clear();
+        mUndoStack.add(new Snapshot(mOverlay.getPoints(), mOverlay.isClosed()));
+        updateStatusText();
+        updateUndoButton();
+        frameLoadedRoute(route.getPoints());
+        return true;
+    }
+
+    private void frameLoadedRoute(List<LatLng> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        mMapView.post(() -> {
+            try {
+                if (points.size() == 1) {
+                    mBaiduMap.setMapStatus(MapStatusUpdateFactory.newLatLngZoom(points.get(0), 18f));
+                    return;
+                }
+                LatLngBounds.Builder builder = new LatLngBounds.Builder();
+                for (LatLng point : points) {
+                    builder.include(point);
+                }
+                mBaiduMap.setMapStatus(MapStatusUpdateFactory.newLatLngBounds(builder.build()));
+            } catch (Exception e) {
+                XLog.e("ROUTE: ERROR - frameLoadedRoute");
+            }
+        });
+    }
+
     /** 撤销一步：丢弃当前状态，恢复到上一个快照。 */
     private void undo() {
         if (mUndoStack.isEmpty()) {
@@ -528,6 +581,10 @@ public class RouteDrawActivity extends BaseActivity {
         final EditText nameInput = new EditText(this);
         nameInput.setHint(R.string.route_draw_save_name_hint);
         nameInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        if (mEditingOriginalName != null) {
+            nameInput.setText(mEditingOriginalName);
+            nameInput.selectAll();
+        }
         container.addView(nameInput);
 
         // 列出已有名称：既让用户知道哪些名字被占用（重名会被拒），也验证保存确实生效
@@ -549,7 +606,9 @@ public class RouteDrawActivity extends BaseActivity {
         container.addView(existing);
 
         new AlertDialog.Builder(this)
-                .setTitle(R.string.route_draw_save_title)
+                .setTitle(mEditingOriginalName == null
+                        ? R.string.route_draw_save_title
+                        : R.string.route_history_save_edit_title)
                 .setView(container)
                 .setPositiveButton(R.string.app_dialog_confirm, (dialog, which) ->
                         saveRoute(nameInput.getText().toString()))
@@ -570,9 +629,27 @@ public class RouteDrawActivity extends BaseActivity {
             GoUtils.DisplayToast(this, getResources().getString(R.string.route_draw_save_failed));
             return;
         }
-        if (DataBaseRoute.nameExists(mRouteDb, name)) {
+        boolean editing = mEditingOriginalName != null;
+        boolean renamed = editing && !mEditingOriginalName.equalsIgnoreCase(name);
+        if ((!editing || renamed) && DataBaseRoute.nameExists(mRouteDb, name)) {
             GoUtils.DisplayToast(this,
                     getResources().getString(R.string.route_draw_save_duplicate));
+            return;
+        }
+
+        if (editing) {
+            boolean updated = DataBaseRoute.updateRoute(mRouteDb, mEditingOriginalName,
+                    name, mOverlay.isClosed(), mOverlay.getPoints());
+            if (!updated) {
+                GoUtils.DisplayToast(this, DataBaseRoute.nameExists(mRouteDb, name) && renamed
+                        ? getString(R.string.route_draw_save_duplicate)
+                        : getString(R.string.route_draw_save_failed));
+                return;
+            }
+            mEditingOriginalName = name;
+            GoUtils.DisplayToast(this, getString(R.string.route_history_update_ok));
+            setResult(RESULT_OK);
+            finish();
             return;
         }
 

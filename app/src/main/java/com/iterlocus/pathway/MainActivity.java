@@ -435,6 +435,10 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                 Intent intent = new Intent(MainActivity.this, RouteDrawActivity.class);
 
                 startActivity(intent);
+            } else if (id == R.id.nav_route_history) {
+                Intent intent = new Intent(MainActivity.this, RouteHistoryActivity.class);
+
+                startActivity(intent);
             } else if (id == R.id.nav_route_sim) {
                 Intent intent = new Intent(MainActivity.this, RouteSimulationActivity.class);
 

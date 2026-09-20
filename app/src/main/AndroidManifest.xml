@@ -91,6 +91,7 @@
         <activity
             android:name=".WelcomeActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/AppTheme.NoActionBar"
             >
             <intent-filter>
@@ -103,24 +104,28 @@
             android:name=".MainActivity"
             android:launchMode="singleInstance"
             android:exported="false"
+            android:screenOrientation="portrait"
             android:theme="@style/AppTheme.NoActionBar" />
 
         <activity
             android:name=".SettingsActivity"
             android:label="@string/app_settings"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".HistoryActivity"
             android:label="@string/app_history"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <!-- 保持默认启动模式：NFC 前台调度依赖它。
              模块 README 明确要求接收标签的 Activity 不能设成 singleInstance。 -->
         <activity
             android:name=".NfcCardActivity"
             android:label="@string/app_nfc_card"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <!-- 锁定竖屏：本界面持有 MapView、GL 覆盖层、一次性定位客户端，
              以及用户正在画的那条路线。旋转会重建 Activity，把整条绘制连同撤销栈一起丢掉。
@@ -134,9 +139,16 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".RouteHistoryActivity"
+            android:label="@string/app_route_history"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".RouteSimulationActivity"
             android:label="@string/app_route_simulation"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
     </application>
 
