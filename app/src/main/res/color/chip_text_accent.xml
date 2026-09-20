@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主操作片的文字颜色。
+     启用态必须是白色：深色 #212121 压在 colorPrimary 上只有 3.54:1，低于 WCAG AA
+     对普通字号要求的 4.5:1（同一比例在 chip_text_toggle 里已经裁定过「不达标」）。
+     禁用态反过来用深色：禁用的填充是近白的 #99FFFFFF，白字会看不见。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false" android:color="#61000000" />
+    <item android:color="#FFFFFF" />
+</selector>

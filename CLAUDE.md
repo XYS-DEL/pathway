@@ -164,11 +164,98 @@ Three `SQLiteOpenHelper`s: `HistoryLocation.db` and `HistorySearch.db` (the orig
   GL 覆盖层与一次性定位客户端，旋转会重建 Activity，把用户正在画的那条路线连同撤销栈一起丢掉。
   代价是画不了横屏——若日后要放开，应先做点集持久化，而不是直接删掉这行。
 
+### 路线模拟
+
+侧滑菜单「模拟路线」→ `RouteSimulationActivity`（`exported="false"`）：选一条已保存的路线、选速度档位、
+开始 / 结束模拟。移动本身由 `ServiceGo` 的 10Hz 定位循环推进，引擎是纯逻辑的 `RoutePlayer`
+（23 个 JVM 单元测试）。
+
+**引擎放在 `ServiceGo` 而不是 Activity 里**，因为用户按下开始之后一定会切走到目标 App——任何建立在
+Activity 上的定时器都会在后台被冻结，位置就不动了，那样这个功能没有意义。服务本来就有一个 10Hz 循环和
+一个可变的「当前位置」单元格，摇杆的移动本质就是改它，所以推送代码（`setLocationGPS()` /
+`setLocationNetwork()`）一行都没改；`advanceRoute()` 只是同一个单元格的另一个写者。
+
+- **`RoutePlayer` 只认 WGS84 的 `double[][]`**（每个元素 `{经度, 纬度}`）。刻意不收 `LatLng`——那个类型
+  在本项目里既装 BD09 也装别的，不携带坐标系信息。**BD09→WGS84 只在 `buildRow()` 建列表时做一次**，
+  之后全程 WGS84，因为 `setTestProviderLocation` 要的就是 WGS84。
+- **`dt` 取 `SystemClock.elapsedRealtime()` 的差值并夹在 `MAX_TICK_SECONDS`（1s）。** 不要写死 0.1：
+  `Thread.sleep(100)` 会漂，几公里的路线上累积误差肉眼可见；上限是防 doze / GC 长暂停之后一次跳出几百米。
+  取时钟、更新 `mLastTickMs` 基准刻意放在 `try` **外面**——基准必须无条件每 tick 前移，否则某 tick
+  一抛异常基准就停在过去，此后每次 `dt` 都吃满上限。
+- **`startRoute()` 的两条拒绝各有各的不可省之处，但都不是「防御性装饰」这个笼统说法能覆盖的。**
+  单就「拒绝」而言，「点数 < 2」那一半是被第二条吞掉的：0 点或 1 点的数组在 `RoutePlayer` 里算出的总长
+  必为 0（少于 2 个点根本成不了段），第二条同样拦得住。第一条真正不可省的是 **`wgsPoints == null` 的
+  短路**——少了它，null 输入会当场或在那道逐行验形上抛 NPE（`.length` / for-each 解引用），而
+  `startRoute` 没有 try/catch，异常会逃到主线程，违反「记日志后降级」的约定。反过来第二条也不能被第一条
+  替代：两个**重合**的点长度是 2，过得了第一条，而总长仍是 0。`RoutePlayer.isFinished()` 对零长路线返回 true
+  （`!mClosed && mDistance >= mTotalDistance`，即 `0 >= 0`）：零长的**开环**路线一开始就是「已到达」，
+  `advanceRoute()` 每 tick 在开头早退，位置永远不动而通知与界面写着「已到达终点」；零长的**闭合**路线
+  反过来——永远不推进也永远不结束。两条之间还有一道逐行验形（null 行 / 长度不足 / 非有限值），它挡的是
+  非有限的**输入**；总长那条则写成 `!(x > 0d)` 而不是 `x <= 0d`——**有限**输入也能算出 NaN 总长
+  （两个极大坐标会让 Haversine 的差值溢出成 ±Inf，`Math.sin(±Inf)` 即 NaN），而 `NaN <= 0d` 为 false。
+- **手动干预会终止播放**：`setPosition()` 第一件事就是 `stopRoute()`。但「位置只有一个写者」是**被收窄的，
+  不是绝对的**：已经进入回写阶段的那个 tick 靠回写前的一次复检（`mRoutePlayer != player`）被丢弃，把窗口
+  从一次 `advance() + getPosition()` 缩到相邻几条指令；彻底的单写者要把所有写者（含摇杆那一路）都并到
+  定位线程，是另一个量级的改动，没做。推论：**`JoyStick.setCurrentPosition` 绝不能每 tick 调**——它会
+  `mBaiduMap.clear()` 并 `animateMapStatus`，10Hz 下地图会被拖着抖。位置回写只写单元格，地图同步只在
+  这几个时点做：启动服务的 `onStartCommand`、瞬移 `setPosition()`、开始 `startRoute()`、结束
+  `stopRoute()`、到达 `onRouteFinished()`。
+- **摇杆禁用分两层，缺一不可。** 权威层是 `ServiceGo` 的两个 listener 回调（播放期间一律忽略摇杆输入）；
+  `JoyStick.setInputEnabled` 加它自己四个入口（方向收口 `processDirection`、窗口拖拽的 `onTouch`、内置地图
+  落点、历史列表选点）的守卫，是让「禁用」在观感上成立。界面层入口分散，单靠它拦不干净；单靠服务层则是
+  一个看得见、拖得动却毫无反应的控件。
+- **判据是 `isRoutePlaying()`（`player != null && !isFinished()`），不是 `mRoutePlayer != null`。**
+  到达终点后路线**刻意不自动结束**（用户此刻「站」在终点，位置不再被推进），字面的 null 判断会留下一个
+  全不透明、拖不动的摇杆。
+- **需要「执行时重新求值」的状态不要传值。** `refreshJoyStickInputEnabled()` 与 `updateNotification()`
+  投递的是会重读当前状态的任务，而不是调用点算好的布尔值 / 文案。传值版本有一条可达的陈旧写入竞态：
+  定位线程算出「该恢复」的同时主线程刚好开了新路线，后到的那次会写回旧结论。
+- **闭合路线无限循环，且 `getDistanceCovered()` 每圈归零**，所以进度显示必须带 `getLapCount()`，
+  否则用户看到的是「没走完就跳回 0」。
+- **进度靠轮询（500ms）不注册回调**：不会在 Activity 销毁时泄漏监听器，系统重建后自然接上。
+  `RouteProgress.getRouteName()` 是重建后恢复界面状态的唯一来源；但**没有路线在跑时压根没有快照**，
+  所以选中行还经 `onSaveInstanceState` 存索引。存索引成立的前提是 `queryAll` 的排序确定
+  （`db.query(...)` **第 7 个参数**是 `CREATED_AT DESC`；该列是秒级的，同一秒创建的两条并列时 SQLite
+  不保证相对顺序）。**若改了那个排序，恢复必须改成按名字查找**，否则旋转后会静默选中另一条路线。
+- **列表行的选中态键在 `state_activated`，而这个激活态是适配器自己在 `getView` 里
+  `row.setActivated(position == mSelectedIndex)` 设上的**（回收复用，所以两个方向都要显式设）。`ListView`
+  那条自动激活路径只在 `setItemChecked` / `setChoiceMode` 系列被调用时才走，本界面从未调用它们（全仓
+  grep 无命中）——**别因为看到「ListView 会自动置激活态」就省掉这行 `setActivated`**。键在 `state_checked`
+  的 `bg_tool_chip_toggle` / `chip_text_toggle` **不能**复用到行上：状态键对不上是**静默失败**，编得过、
+  lint 过，选中就是没有视觉变化。行用 `bg_route_row` / `route_row_text`。
+- **`bindService` 配 `BIND_AUTO_CREATE` 会创建服务**，而 `ServiceGo.onCreate` 会装 test provider 并起前台
+  通知——光打开模拟界面就把模拟位置服务启动了，显然不是用户要的。所以界面只在 `ServiceGo.isAlive()` 时才在
+  `onResume` 里绑定；服务没活着就不可能有路线在跑。`startSimulation()` 则无条件 `startForegroundService`，
+  并把**路线首点**作为 extras 传进去：`onStartCommand` 用它初始化位置单元格，`startRoute()` 再用它同步摇杆
+  内置地图；不传就先落到 `DEFAULT_LAT/DEFAULT_LNG`（36.66, 117.03）再被路线第一帧覆盖，界面会闪一下那个
+  坐标。绑定是异步的，`startRoute` 由 `onServiceConnected` 补发（`mPendingStart`）。
+
+**已知缺陷（没修，别当成能用）**：`MainActivity.isMockServStart` 同时是显示标志和「MainActivity 绑定过服务」
+的代理（它守着两处 `unbindService`），而 `mServiceBinder` 只在 MainActivity 自己的连接里赋值。从模拟界面
+启动路线再回到主界面时它仍是 false：FAB 图标停在 `ic_position`（「未启动」）而服务其实活着、路线正在跑。
+此时在地图上点一个标记点、连按两次 FAB 就会落到 `stopGoLocation()` → `stopService`——第一次按走的是
+`startGoLocation()`（它同样不知道路线在跑：会再 bind 一次，并把位置单元格写成那个标记点、把
+`isMockServStart` 置 true；那次写入约 100ms 后就被 `advanceRoute()` 用路线位置覆盖，位置不会真停在
+标记点上），
+第二次按因为标记点已被清掉就进了停止分支：服务停掉、模拟位置终止，Snackbar 会提示「模拟位置已终止」，
+但**正在跑的那条路线是被一并杀掉的，这一步没有任何提示**。正确修法是让
+「是否绑定」与「服务是否存活」分开记、FAB 状态从服务反推，没做。同类记账问题：
+`RouteSimulationActivity.mBound` 只在 `onServiceConnected` 里置 true，而 `bindService` 有两处发出点
+（`onResume` 与 `startSimulation` 的补发路径），连接没落地的那次绑定不会被 `unbindService` 释放。
+
+**这个界面至今没有在任何设备上渲染过**（`exported="false"`，本机没有 arm64 设备或模拟器镜像，APK 只有
+arm64-v8a）：行选中态的观感、速度档位片、空态与禁用态、按钮对比度、大字号下档位行是否被裁，**全部未经
+视觉验收**。本项目已有一次同类教训（见上一节：纯读代码判定「顶多是一道浅缝」，截图是一大块白块）。
+这是开放项，不是已完成。
+
+**待办**：NFC 卡片 URL 的解析（现在只把收到的 URL / 包名 / source 原样显示供核对）；路线的编辑与删除；
+播放期间的实时轨迹回放；速度自由输入。
+
 ### NFC 位置卡
 
 `:nfc` 是独立的 Gradle 库模块（`com.android.library`，namespace `com.acooldog.nfc`），零第三方依赖、无资源、无 manifest 声明，设计目标是可整体复制到别的工程。它提供读卡（`NfcReaderSession`）、伪造贴卡派发（`NfcSender`）、配置持久化（`NfcConfigStore`）。
 
-`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`——那是个占位界面，解析坐标、坐标系换算、自定义路线、选路线、开始模拟都是它的后续工作。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
+`NfcCardActivity` 读卡后**只显示 URL 与包名，不做任何解析**。四个按钮里「模拟nfc」把三个原始值（URL / 包名 / source）交给 `RouteSimulationActivity`——那个界面已经做完了选路线、档位与开始 / 结束模拟（见「路线模拟」一节），但它**不解析这三个值**，只原样显示供核对；解析坐标仍是后续工作。设计文档见 `docs/superpowers/specs/2026-09-19-nfc-card-design.md`。
 
 两条硬约束：
 

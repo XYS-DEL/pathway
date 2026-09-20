@@ -1,7 +1,8 @@
 # 行屿 路线模拟 — 设计
 
 - 日期：2026-09-20
-- 状态：设计已确认，待实现
+- 状态：**已实现**。当前行为的权威描述在 `CLAUDE.md` 的「路线模拟」一节；本文是设计记录，
+  实现期间与原设计的偏离（以及那些偏离的理由）记在那里，不在这份文档里追平
 - 相关：
   - `docs/superpowers/specs/2026-09-19-route-draw-design.md`（绘制路线，产出 `RouteConfig` 表）
   - `docs/superpowers/specs/2026-09-19-nfc-card-design.md`（NFC 位置卡，`RouteSimulationActivity` 的现有入口）
@@ -171,7 +172,7 @@ public RouteProgress getRouteProgress()   // 未播放时返回 null
 
 `setPosition(double lng, double lat, double alt)`（主界面瞬移）在改单元格之前先 `stopRoute()`。
 
-理由：播放中瞬移是自相矛盾的状态——两个写入者抢同一个单元格，位置来源不明。终止播放让「谁在控制位置」始终只有一个答案。
+理由：播放中瞬移是自相矛盾的状态——两个写入者抢同一个单元格，位置来源不明。终止播放把「谁在控制位置」这个窗口**收窄**到相邻几条指令（已经进入回写阶段的那个 tick 会被回写前的一次复检丢弃），但**没有消除**：彻底的单写者需要把所有写入者——含摇杆那一路——都并到定位线程，本分支没有做。代码注释与 `CLAUDE.md` 的「路线模拟」一节都是这个如实版本。
 
 ### 服务存活标志
 
@@ -180,7 +181,7 @@ private static volatile boolean sAlive = false;   // onCreate 置 true，onDestr
 public  static boolean isAlive()
 ```
 
-供 `MainActivity` 对账（见下）。静态状态跨 Activity 协调在本项目有先例（`MainActivity.mMarkLatLngMap` 是静态的，`showLocation()` 是静态方法）。
+实际用途只有一个：让 `RouteSimulationActivity` 在 `onResume` 里判断该不该绑定，免得 `BIND_AUTO_CREATE` 把一个已经死掉的服务凭空**创建**出来（`MainActivity` 零处引用它）。「供 `MainActivity` 对账 `isMockServStart`」是**未实现的设想**——那个字段是已知陈旧字段，对账没有做，理由与后果见 `CLAUDE.md` 的「已知缺陷」一节。静态状态跨 Activity 协调在本项目有先例（`MainActivity.mMarkLatLngMap` 是静态的，`showLocation()` 是静态方法）。
 
 ### 通知
 
@@ -268,13 +269,16 @@ resetBaiduMap() → mBaiduMap.clear() + setMyLocationData() + animateMapStatus()
 
 `MainActivity.isMockServStart` 是 Activity 自己的字段，在 `startGoLocation()` / `stopGoLocation()` 里维护。模拟界面独立启动服务后，这个字段是错的——回到主界面，FAB 显示「未启动」，但服务实际在跑并在移动。
 
-**修法**：`MainActivity.onResume()` 里用 `ServiceGo.isAlive()` 对账：
+**修法（已废弃，见下方警示，不要照做）**：`MainActivity.onResume()` 里用 `ServiceGo.isAlive()` 对账：
 
 ```java
 isMockServStart = ServiceGo.isAlive();
 ```
 
+> **警示：上面这行不能实现。** 逐行复核代码后确认：`isMockServStart` 同时是「显示标志」和「MainActivity 已经绑定过服务」的代理（它守着 `stopGoLocation()` 与 `onDestroy()` 两处 `unbindService`），而 `mServiceBinder` 只在 MainActivity 自己的连接回调里赋值。直接按 `isAlive()` 赋值会出现「字段为 true 但从未绑定」的状态：解绑一个未注册的连接抛 `IllegalArgumentException`，紧随其后的 FAB 分支再解引用空 binder 崩溃。正解是把「是否绑定」与「服务是否存活」拆成两本账、FAB 状态从服务反推——**本分支没有做**，见 `CLAUDE.md` 的「已知缺陷」一节。此段保留是为了说明当初为什么这么想。
+
 顺带修掉一个既有的潜伏问题：服务被系统杀死后，这个字段本来就是陈旧的。
+（这个「潜伏问题」是真的，但上面的修法会引入更严重的问题，所以至今**未修**。）
 
 ## 界面
 

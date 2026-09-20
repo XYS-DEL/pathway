@@ -202,6 +202,61 @@ public class RouteGeometryTest {
                 RouteGeometry.LINE_SAMPLE_MIN_DISTANCE_METERS));
     }
 
+    @Test
+    public void doubleDistanceMatchesLatLngVersion() {
+        LatLng a = new LatLng(39.915, 116.404);
+        LatLng b = new LatLng(39.925, 116.414);
+        assertEquals(RouteGeometry.distanceMeters(a, b),
+                RouteGeometry.distanceMeters(a.longitude, a.latitude, b.longitude, b.latitude),
+                1e-9);
+    }
+
+    @Test
+    public void doubleDistanceTakesLongitudeFirst() {
+        // 原点不能取 (0,0)：把 (纬度, 经度) 互换是球面关于 x=y 平面的镜射，是等距变换，
+        // 而 (0,0) 正好在这个镜面上——实测两个距离差 0.0，钉不住参数顺序。
+        // 改取赤道外的原点 (0, 60)：那里 1 经度约 55.6 公里，换成 (0,60) → (60,1) 则跨 59 个纬度。
+        double correct = RouteGeometry.distanceMeters(0, 60, 1, 60);
+        double swapped = RouteGeometry.distanceMeters(0, 60, 60, 1);
+        assertTrue("参数顺序写反应得到完全不同的距离", Math.abs(correct - swapped) > 1000d);
+
+        // 只断言"两者不同"不够：把纬度当经度用同样会得到不同的值。还得钉住 correct
+        // 就是地理上对的那个——60°N 上 1 经度 ≈ 111195 * cos(60°) 米。
+        assertEquals(111195d * Math.cos(Math.toRadians(60d)), correct, ONE_DEGREE_TOLERANCE);
+    }
+
+    @Test
+    public void bearingIsZeroDueNorth() {
+        assertEquals(0d, RouteGeometry.initialBearingDegrees(0, 0, 0, 1), 0.5);
+    }
+
+    @Test
+    public void bearingIsNinetyDueEast() {
+        assertEquals(90d, RouteGeometry.initialBearingDegrees(0, 0, 1, 0), 0.5);
+    }
+
+    @Test
+    public void bearingIsOneEightyDueSouth() {
+        assertEquals(180d, RouteGeometry.initialBearingDegrees(0, 1, 0, 0), 0.5);
+    }
+
+    @Test
+    public void bearingIsTwoSeventyDueWest() {
+        assertEquals(270d, RouteGeometry.initialBearingDegrees(1, 0, 0, 0), 0.5);
+    }
+
+    @Test
+    public void bearingIsZeroForIdenticalPoints() {
+        assertEquals(0d, RouteGeometry.initialBearingDegrees(1, 2, 1, 2), 1e-9);
+    }
+
+    @Test
+    public void bearingCrossesAntimeridianGoingEast() {
+        // 179.9°E → 179.9°W 是向东跨过 180° 的一小步（约 22 公里），
+        // 不是向西绕地球一圈。平面 atan2 会给出 ~270°，正确结果是 ~90°。
+        assertEquals(90d, RouteGeometry.initialBearingDegrees(179.9, 0, -179.9, 0), 0.5);
+    }
+
     private static boolean contains(List<LatLng> points, LatLng target) {
         for (LatLng p : points) {
             if (Math.abs(p.latitude - target.latitude) < 1e-9

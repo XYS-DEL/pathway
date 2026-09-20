@@ -435,6 +435,10 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                 Intent intent = new Intent(MainActivity.this, RouteDrawActivity.class);
 
                 startActivity(intent);
+            } else if (id == R.id.nav_route_sim) {
+                Intent intent = new Intent(MainActivity.this, RouteSimulationActivity.class);
+
+                startActivity(intent);
             } else if (id == R.id.nav_settings) {
                 Intent intent = new Intent(MainActivity.this, SettingsActivity.class);
                 startActivity(intent);
@@ -860,8 +864,15 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
             } else {
                 double[] latLng = MapUtils.bd2wgs(mMarkLatLngMap.longitude, mMarkLatLngMap.latitude);
                 double alt = Double.parseDouble(sharedPreferences.getString("setting_altitude", "55.0"));
+                // 必须在 setPosition 之前问：它第一件事就是 stopRoute（位置不能有两个写者），
+                // 问晚了永远是 null。瞬移会无声地结束正在跑的路线，这件事得说出来。
+                boolean routeEnded = mServiceBinder != null
+                        && mServiceBinder.getRouteProgress() != null;
                 mServiceBinder.setPosition(latLng[0], latLng[1], alt);
-                Snackbar.make(v, "已传送到新位置", Snackbar.LENGTH_LONG)
+                Snackbar.make(v, routeEnded
+                                ? getResources().getString(R.string.app_teleport_route_ended)
+                                : "已传送到新位置",
+                        Snackbar.LENGTH_LONG)
                         .setAction("Action", null).show();
 
                 recordCurrentLocation(mMarkLatLngMap.longitude, mMarkLatLngMap.latitude);

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 路线列表行的文字色。View.setActivated 会经 ViewGroup.dispatchSetActivated
+     传播到子视图，所以行内两个 TextView 共用这一个文件就能跟着变。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true" android:color="#FFFFFF" />
+    <item android:color="#212121" />
+</selector>

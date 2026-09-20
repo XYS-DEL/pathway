@@ -4,9 +4,12 @@
      按下态分两条写，分别压在本分支常态之前：
      "选中+按下" 必须排在 "选中" 之前，否则按下时仍然是常态底色，看不出反馈。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 按下态用不透明实底，不是随手调色：半透明会随背后内容合成出不确定的对比度——
+         #CC00695C（80% 不透明）压在浅色背景上合成成 #32867C，白字只剩 4.34:1，低于 AA 的 4.5:1；
+         不透明的 #00695C 是 6.61:1，且比 colorPrimary 更深，按压变深本来就是正确的可供性。 -->
     <item android:state_checked="true" android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="#CC00695C" />
+            <solid android:color="#00695C" />
             <corners android:radius="22dp" />
             <stroke
                 android:width="1dp"

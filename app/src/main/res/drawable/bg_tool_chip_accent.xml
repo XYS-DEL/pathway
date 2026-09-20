@@ -1,7 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 主操作片：主题色实底，与其余片区分。 -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <solid android:color="@color/colorPrimary" />
-    <corners android:radius="22dp" />
-</shape>
+<!-- 主操作片：主题色实底，与其余片区分。
+     必须带禁用态：模拟界面的「开始模拟」在没有路线可选时置灰，
+     若外观不变，用户看到的就是一个能点却没反应的按钮——本项目已栽过一次。
+     按下态用不透明实底，不是随手调色：半透明会随背后内容合成出不确定的对比度——
+     #CC00695C（80% 不透明）压在浅色背景上合成成 #32867C，白字只剩 4.34:1，低于 AA 的 4.5:1；
+     不透明的 #00695C 是 6.61:1，且比 colorPrimary 更深，按压变深本来就是正确的可供性。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#99FFFFFF" />
+            <corners android:radius="22dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#4DFFFFFF" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#00695C" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/colorPrimary" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+</selector>
