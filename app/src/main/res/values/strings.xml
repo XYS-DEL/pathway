@@ -190,6 +190,8 @@
     <string name="app_route_paused">路线模拟已暂停</string>
     <string name="app_route_arrived">已到达终点</string>
     <string name="note_route_stop">结束路线</string>
+    <string name="note_route_pause">暂停路线</string>
+    <string name="note_route_resume">继续路线</string>
     <!-- 刻意保留的死字符串，不是未完成功能的残留：留着是为了必要时能退回占位版，
          lint 的 UnusedResources 对它是有意接受的。 -->
     <string name="route_sim_placeholder">模拟路线功能开发中</string>

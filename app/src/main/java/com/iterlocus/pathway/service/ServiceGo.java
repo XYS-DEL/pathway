@@ -80,6 +80,7 @@ public class ServiceGo extends Service {
     private static final String SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW = "ShowJoyStick";
     private static final String SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE = "HideJoyStick";
     private static final String SERVICE_GO_NOTE_ACTION_ROUTE_STOP = "StopRoute";
+    private static final String SERVICE_GO_NOTE_ACTION_ROUTE_PAUSE = "PauseRoute";
     private static final String SERVICE_GO_NOTE_CHANNEL_ID = "SERVICE_GO_NOTE";
     private static final String SERVICE_GO_NOTE_CHANNEL_NAME = "SERVICE_GO_NOTE";
     private NoteActionReceiver mActReceiver;
@@ -182,6 +183,7 @@ public class ServiceGo extends Service {
         filter.addAction(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW);
         filter.addAction(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE);
         filter.addAction(SERVICE_GO_NOTE_ACTION_ROUTE_STOP);
+        filter.addAction(SERVICE_GO_NOTE_ACTION_ROUTE_PAUSE);
         registerReceiver(mActReceiver, filter);
 
         NotificationChannel mChannel = new NotificationChannel(SERVICE_GO_NOTE_CHANNEL_ID, SERVICE_GO_NOTE_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT);
@@ -236,11 +238,19 @@ public class ServiceGo extends Service {
                 .setContentTitle(getResources().getString(R.string.app_name))
                 .setContentText(text)
                 .setContentIntent(clickPI)
-                .addAction(new NotificationCompat.Action(null, getResources().getString(R.string.note_show), showPendingPI))
-                .addAction(new NotificationCompat.Action(null, getResources().getString(R.string.note_hide), hidePendingPI))
                 .setSmallIcon(R.mipmap.ic_launcher);
 
         if (player != null) {
+            if (!player.isFinished()) {
+                Intent pauseIntent = new Intent(SERVICE_GO_NOTE_ACTION_ROUTE_PAUSE);
+                pauseIntent.setPackage(getPackageName());
+                PendingIntent pausePendingPI = PendingIntent.getBroadcast(
+                        this, 4, pauseIntent, PendingIntent.FLAG_IMMUTABLE);
+                builder.addAction(new NotificationCompat.Action(
+                        mRoutePaused ? R.drawable.ic_route_play : R.drawable.ic_route_pause,
+                        getString(mRoutePaused ? R.string.note_route_resume : R.string.note_route_pause),
+                        pausePendingPI));
+            }
             Intent stopIntent = new Intent(SERVICE_GO_NOTE_ACTION_ROUTE_STOP);
             // 与上面两个同样收成只发给本包。这一个尤其不能漏：伪造的 StopRoute 能直接停掉
             // 正在跑的路线，比伪造摇杆可见性更糟——而它原先恰恰是唯一没设 setPackage 的。
@@ -249,6 +259,11 @@ public class ServiceGo extends Service {
             PendingIntent stopPendingPI = PendingIntent.getBroadcast(this, 3, stopIntent, PendingIntent.FLAG_IMMUTABLE);
             builder.addAction(new NotificationCompat.Action(null,
                     getResources().getString(R.string.note_route_stop), stopPendingPI));
+        } else {
+            builder.addAction(new NotificationCompat.Action(null,
+                    getResources().getString(R.string.note_show), showPendingPI));
+            builder.addAction(new NotificationCompat.Action(null,
+                    getResources().getString(R.string.note_hide), hidePendingPI));
         }
 
         return builder.build();
@@ -670,6 +685,16 @@ public class ServiceGo extends Service {
                 // 摇杆保持隐藏、通知回收）必须整段跑，不能在这里抄一遍
                 if (action.equals(SERVICE_GO_NOTE_ACTION_ROUTE_STOP)) {
                     mBinder.stopRoute();
+                }
+                if (action.equals(SERVICE_GO_NOTE_ACTION_ROUTE_PAUSE)) {
+                    RoutePlayer player = mRoutePlayer;
+                    if (player != null && !player.isFinished()) {
+                        if (mRoutePaused) {
+                            mBinder.resumeRoute();
+                        } else {
+                            mBinder.pauseRoute();
+                        }
+                    }
                 }
             }
         }

@@ -25,10 +25,10 @@ import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
 import androidx.preference.PreferenceManager;
 
+import com.acooldog.nfc.NfcConfigStore;
 import com.acooldog.nfc.NfcPayload;
 import com.acooldog.nfc.NfcPayloadDispatchResult;
 import com.acooldog.nfc.NfcSender;
-import com.acooldog.nfc.NfcConfigStore;
 import com.acooldog.nfc.SavedNfcConfig;
 import com.baidu.mapapi.map.BaiduMap;
 import com.baidu.mapapi.map.BitmapDescriptorFactory;
@@ -964,55 +964,33 @@ public class RouteSimulationActivity extends BaseActivity {
             GoUtils.showDisableWifiDialog(this);
         }
 
-        // 卡片带了链接就跳过去。**放在最后、且只在真的开起来之后**：目标应用打不开时模拟
-        // 已经跑起来了，那正是有用的结果，所以下面失败只提示、不回滚。
-        // 顺序也是刻意的：先把 WiFi 那条警告挂上，用户从目标 App 回来时还看得见它。
         sendCardPayload();
 
         refreshProgress();
     }
 
-    /*===== 跳到卡片上的链接 =====*/
-
-    /**
-     * 把 NFC 卡片内容作为伪 NDEF 事件发给目标应用，没有卡片内容就什么都不做。
-     *
-     * <p>从侧滑菜单进来时 {@code EXTRA_CARD_URL} 是空的，走纯模拟路径，行为与从前一致；
-     * 只有卡片带了链接才跳。带包名时使用 {@link NfcSender} 发送 URI Record + AAR，
-     * 让目标应用按真实 NFC 发现事件处理，而不是只发送普通 URL Intent。
-     *
-     * <p>NfcSender 内部先尝试 {@code ACTION_NDEF_DISCOVERED}，失败后回退到指定包名和通用的
-     * {@code ACTION_VIEW}。失败（目标应用未安装、没有匹配 Activity 或格式不对）只记日志加提示，**不回滚已经开始的
-     * 模拟**：那才是有用的结果。
-     */
     private void sendCardPayload() {
         if (isEmpty(mCardUrl)) {
             return;
         }
-
         if (isEmpty(mCardPackageName)) {
-            // 没有 AAR 包名时无法伪造定向 NFC 事件，保留普通 URL 的兼容路径。
             openCardUrl(mCardUrl);
             return;
         }
-
         NfcPayloadDispatchResult result = NfcSender.send(
                 this, new NfcPayload(mCardUrl, mCardPackageName, mCardSource));
         if (!result.isSuccessful()) {
             XLog.e("ROUTE_SIM: ERROR - sendCardPayload: " + result.getDetail());
-            GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_open_url_failed));
+            GoUtils.DisplayToast(this, getString(R.string.route_sim_open_url_failed));
         }
     }
 
     private void openCardUrl(String url) {
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-            startActivity(intent);
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception e) {
-            // Uri.parse 本身不抛，失败发生在 startActivity 找不到接收方时
-            // （ActivityNotFoundException 等）。按项目约定记日志后降级。
             XLog.e("ROUTE_SIM: ERROR - openCardUrl");
-            GoUtils.DisplayToast(this, getResources().getString(R.string.route_sim_open_url_failed));
+            GoUtils.DisplayToast(this, getString(R.string.route_sim_open_url_failed));
         }
     }
 
