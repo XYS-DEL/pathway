@@ -200,9 +200,14 @@ public class ServiceGo extends Service {
         //准备intent
         Intent clickIntent = new Intent(this, MainActivity.class);
         PendingIntent clickPI = PendingIntent.getActivity(this, 1, clickIntent, PendingIntent.FLAG_IMMUTABLE);
+        // setPackage：把这两个广播收成「只发给本包」。不设的话它们是隐式广播，
+        // 本 App 自己发出去的 ShowJoyStick/HideJoyStick 也会被别的 App 注册的同名
+        // receiver 收走。注意这**只约束发送侧**——见下面 onReceive 处关于收信侧的说明。
         Intent showIntent = new Intent(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW);
+        showIntent.setPackage(getPackageName());
         PendingIntent showPendingPI = PendingIntent.getBroadcast(this, 0, showIntent, PendingIntent.FLAG_IMMUTABLE);
         Intent hideIntent = new Intent(SERVICE_GO_NOTE_ACTION_JOYSTICK_HIDE);
+        hideIntent.setPackage(getPackageName());
         PendingIntent hidePendingPI = PendingIntent.getBroadcast(this, 0, hideIntent, PendingIntent.FLAG_IMMUTABLE);
 
         // mRoutePlayer 是 volatile，读一次进局部：正文文案与动作列表取自同一个快照，
@@ -611,6 +616,13 @@ public class ServiceGo extends Service {
     public class NoteActionReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
+            // 收信侧**仍然是不设防的**，别被上面那句 setPackage 误导成已经安全了：
+            // 本 receiver 是动态注册的，registerReceiver 既没给 permission 也没带
+            // RECEIVER_NOT_EXPORTED（那是 API 33 才有的常量，本项目 compileSdk 32 引不到），
+            // 所以任何 App 都能给本 App 发这三个 action——伪造的 StopRoute 能直接停掉正在跑的
+            // 路线，伪造的 Show/HideJoyStick 会改写 mJoyStickDesiredVisible（用户的可见性意愿）。
+            // 这是既有问题（本次只把它放大了），要修得统一收口 receiver 的暴露面
+            // （升 compileSdk 后用 RECEIVER_NOT_EXPORTED，或给 receiver 加签名级权限），不在本次范围。
             String action = intent.getAction();
             if (action != null) {
                 if (action.equals(SERVICE_GO_NOTE_ACTION_JOYSTICK_SHOW)) {
@@ -657,8 +669,18 @@ public class ServiceGo extends Service {
          *
          * <p>模拟界面的地图要标出「现在人在哪」，而进度快照
          * （{@link RouteProgress}）里只有里程、没有位置，所以单开这一个只读口子。
-         * 三个字段都是 volatile，读到的是一次自洽的快照；不做任何换算——调用方要画到
-         * 百度地图上，自己走 {@code MapUtils.wgs2bd09}。
+         *
+         * <p><b>这不是一次自洽的快照。</b> 三个字段虽然都是 volatile，但经纬度是两条语句分开
+         * 写（{@code mCurLng = position[0]; mCurLat = position[1];}）、这里也是两次独立的
+         * volatile 读，两次读之间可以跨过一次 tick，于是可能混到两个位置：经度取自这一帧、
+         * 纬度取自下一帧。
+         *
+         * <p>误差上界就是「一个 tick 走的距离」——定位循环约 10Hz（{@code Thread.sleep(100)}），
+         * 按三档速度（1.2 / 3.6 / 10.0 m/s）算约 0.12 / 0.36 / 1.0 米。步行那档不足 0.15 米，
+         * 标在地图上肉眼看不出来，但这只是「量小」，不是「原子」。要真的原子，得把两个值并进
+         * 一个不可变对象一起发布（或让读取方拿一次快照对象），本次没做。
+         *
+         * <p>不做任何换算——调用方要画到百度地图上，自己走 {@code MapUtils.wgs2bd09}。
          */
         public double[] getCurrentPosition() {
             return new double[]{mCurLng, mCurLat};

@@ -16,6 +16,7 @@ import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.BaseAdapter;
 import android.widget.RadioGroup;
 import android.widget.TextView;
@@ -104,6 +105,9 @@ public class RouteSimulationActivity extends BaseActivity {
     private Polyline mRouteLine;
     /** 当前位置标记；第一次真的有路线在跑时才创建，之后复用。 */
     private Marker mPositionMarker;
+    /** 正开着的选路线弹窗。存下来是为了在 onDestroy 里收掉——否则弹窗开着旋转会 WindowLeaked，
+     *  而且弹窗的 ListView 持有 {@link RouteListAdapter}，等于间接持有这个 Activity。 */
+    private AlertDialog mRoutePickerDialog;
 
     private TextView mStatusText;
     private TextView mPrimaryButton;
@@ -276,6 +280,13 @@ public class RouteSimulationActivity extends BaseActivity {
     protected void onDestroy() {
         mPollHandler.removeCallbacks(mPollTask);
 
+        // 弹窗开着时被销毁（旋转 / 返回）必须收掉：不收会 WindowLeaked，
+        // 而且弹窗的 ListView 持有 mAdapter，等于把这个 Activity 一起钉住。
+        if (mRoutePickerDialog != null) {
+            mRoutePickerDialog.dismiss();
+            mRoutePickerDialog = null;
+        }
+
         if (mBound) {
             unbindService(mConnection);
             mBound = false;
@@ -421,7 +432,7 @@ public class RouteSimulationActivity extends BaseActivity {
             });
         }
 
-        builder.show();
+        mRoutePickerDialog = builder.show();
     }
 
     private void selectRow(int index) {
@@ -478,10 +489,19 @@ public class RouteSimulationActivity extends BaseActivity {
 
     /** 摘掉折线覆盖物（如果有），并把本地引用一并清掉。 */
     private void clearRouteLine() {
-        if (mRouteLine != null) {
-            mRouteLine.remove();
-            mRouteLine = null;
+        if (mRouteLine == null) {
+            return;
         }
+        try {
+            mRouteLine.remove();
+        } catch (Exception e) {
+            // 与 renderSelectedRoute / fitCameraTo 同一套：SDK 一旦抛就是主线程崩溃，
+            // 而这条路径可达于轮询任务（refreshProgress → selectRowByName → selectRow →
+            // onSelectionChanged → updateMapForSelection）。另两处都包了，这里也包上。
+            XLog.e("ROUTE_SIM: ERROR - clearRouteLine");
+        }
+        // 抛了也要清引用，否则幂等判断会一直以为「已经画着」
+        mRouteLine = null;
     }
 
     /**
@@ -572,39 +592,70 @@ public class RouteSimulationActivity extends BaseActivity {
      * {@code post} 在 View 还没 attach 时会排队，attach 后执行，两边都安全。
      */
     private void fitCameraTo(List<LatLng> points) {
-        mMapView.post(() -> {
-            try {
-                if (mBaiduMap == null || mMapView.getWidth() == 0 || mMapView.getHeight() == 0) {
-                    return;
-                }
+        mMapView.post(() -> fitCameraNow(points, true));
+    }
 
-                LatLngBounds.Builder builder = new LatLngBounds.Builder();
-                double minLat = Double.MAX_VALUE;
-                double maxLat = -Double.MAX_VALUE;
-                double minLng = Double.MAX_VALUE;
-                double maxLng = -Double.MAX_VALUE;
-                for (LatLng point : points) {
-                    builder.include(point);
-                    minLat = Math.min(minLat, point.latitude);
-                    maxLat = Math.max(maxLat, point.latitude);
-                    minLng = Math.min(minLng, point.longitude);
-                    maxLng = Math.max(maxLng, point.longitude);
-                }
-
-                if (maxLat <= minLat && maxLng <= minLng) {
-                    // 所有点重合：LatLngBounds 退化成一个点，交给 newLatLngBounds 求缩放会退化
-                    // （跨度为 0 时算出的级别没有意义）。改用一个固定的近景级别。
-                    mBaiduMap.setMapStatus(MapStatusUpdateFactory.newLatLngZoom(
-                            points.get(0), SINGLE_POINT_ZOOM));
-                    return;
-                }
-
-                mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newLatLngBounds(
-                        builder.build(), mMapView.getWidth(), mMapView.getHeight()));
-            } catch (Exception e) {
-                XLog.e("ROUTE_SIM: ERROR - fitCameraTo");
+    /**
+     * 真正落相机的那一步。
+     *
+     * @param mayRetry 尺寸还是 0 时是否允许再等一次布局重投——只重投一次，不做成循环
+     */
+    private void fitCameraNow(List<LatLng> points, boolean mayRetry) {
+        try {
+            if (mBaiduMap == null) {
+                return;
             }
-        });
+            if (mMapView.getWidth() == 0 || mMapView.getHeight() == 0) {
+                // 视图尚未 attach / 尚未测绘。post 的队列通常会排在首次测绘之后，但**不保证**；
+                // 而这里一旦就这么放弃，失败是完全不可见的：没日志、没重试，用户看到的就是
+                // 默认相机——正是「旋转后不重新框住路线」那个 bug 本身。
+                // 所以记一条日志，并挂一次性布局回调重投一次。
+                XLog.e(mayRetry
+                        ? "ROUTE_SIM: ERROR - fitCameraTo: 地图尺寸为 0，等首次布局后重投一次"
+                        : "ROUTE_SIM: ERROR - fitCameraTo: 地图尺寸仍为 0，放弃");
+                if (!mayRetry) {
+                    return;
+                }
+                mMapView.getViewTreeObserver().addOnGlobalLayoutListener(
+                        new ViewTreeObserver.OnGlobalLayoutListener() {
+                            @Override
+                            public void onGlobalLayout() {
+                                ViewTreeObserver observer = mMapView.getViewTreeObserver();
+                                if (observer.isAlive()) {
+                                    observer.removeOnGlobalLayoutListener(this);
+                                }
+                                fitCameraNow(points, false);
+                            }
+                        });
+                return;
+            }
+
+            LatLngBounds.Builder builder = new LatLngBounds.Builder();
+            double minLat = Double.MAX_VALUE;
+            double maxLat = -Double.MAX_VALUE;
+            double minLng = Double.MAX_VALUE;
+            double maxLng = -Double.MAX_VALUE;
+            for (LatLng point : points) {
+                builder.include(point);
+                minLat = Math.min(minLat, point.latitude);
+                maxLat = Math.max(maxLat, point.latitude);
+                minLng = Math.min(minLng, point.longitude);
+                maxLng = Math.max(maxLng, point.longitude);
+            }
+
+            if (maxLat <= minLat && maxLng <= minLng) {
+                // 所有点重合：LatLngBounds 退化成一个点，交给 newLatLngBounds 求缩放会退化
+                // （跨度为 0 时算出的级别没有意义）。改用一个固定的近景级别。
+                mBaiduMap.setMapStatus(MapStatusUpdateFactory.newLatLngZoom(
+                        points.get(0), SINGLE_POINT_ZOOM));
+                return;
+            }
+
+            mBaiduMap.animateMapStatus(MapStatusUpdateFactory.newLatLngBounds(
+                    builder.build(), mMapView.getWidth(), mMapView.getHeight()));
+        } catch (Exception e) {
+            XLog.e("ROUTE_SIM: ERROR - fitCameraTo");
+        }
     }
 
     /**
@@ -873,10 +924,18 @@ public class RouteSimulationActivity extends BaseActivity {
         if (progress == null) {
             mStatusText.setText(R.string.route_sim_status_idle);
             mPrimaryButton.setText(R.string.route_sim_start);
+            // 没有路线在跑，可以随便换；库是空的就置灰
+            mPickButton.setEnabled(!mRows.isEmpty());
             return;
         }
 
         mPrimaryButton.setText(R.string.route_sim_stop);
+
+        // 播放中（含已到达、等用户结束）不许换路线。错误处理表里那条规则就是
+        // 「不能直接切，先结束再开始」；不置灰的话，弹窗会让人选，而 500ms 后的
+        // selectRowByName 又把选中翻回去——一次注定失败的操作，还附带折线与相机的抖动。
+        // 置灰用的是现成的禁用片样式（bg_tool_chip / chip_text 都带禁用态），没有新资源。
+        mPickButton.setEnabled(false);
 
         // 系统重建后靠这里把选中行与档位对回去
         selectRowByName(progress.getRouteName());
