@@ -4,126 +4,196 @@
 
 <div align="center">
 
-行屿 - 用于 Android 8.0+ 的无需 ROOT 权限的虚拟定位 APP
+**行屿（Pathway）**
+
+面向 Android 8.0+ 的无需 ROOT 虚拟定位工具
 
 [![license](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](./LICENSE)
+
+[中文](./README.md) · [English](./README.en.md)
+
 </div>
-
-## 关于本仓库
-
-&emsp;&emsp;**行屿**是 [影梭 (GoGoGo)](https://github.com/ZCShou/GoGoGo) 的二次开发分支，在上游代码基础上修改而来。
-
-本仓库相对上游的改动：
-
-1. 包名由 `com.zcshou.gogogo` 改为 `com.iterlocus.pathway`，应用名改为「行屿」
-2. 签名密钥不再进版本库（改由 `local.properties` 配置），发布打包由 Gradle 直接签名
-3. 更新检查与意见反馈入口默认关闭，填入本仓库地址后启用（见 `AppConfig`）
-4. 修复了上游 `master` 中导致无法编译的 `SetIgnoreCacheException` 方法名错误
-
-上游项目地址：<https://github.com/ZCShou/GoGoGo>
-
-### 许可证与署名
-
-&emsp;&emsp;本项目遵循 **GPL-3.0-only**，原始版权归 © ZCShou 所有。
-
-&emsp;&emsp;**开源 ≠ 白嫖。** 依据 GPL-3.0，任何分发本仓库或其衍生版本的行为，都必须继续以 GPL-3.0 开源并提供完整源码，同时保留原始版权声明与许可文本。**请勿闭源分发，也不要只加广告而不开源。** GPL 的法律效力在国内已有诸多诉讼案例，请自行权衡。
 
 ## 简介
 
-&emsp;&emsp;行屿是一个基于 Android 调试 API + 百度地图及定位 SDK 实现的安卓定位修改工具，并且同时实现了一个可以自由控制移动的摇杆。使用行屿，不需要 ROOT 权限就可以随意修改自己的当前位置以及模拟移动。
+行屿基于 Android 调试定位 API 与百度地图/定位 SDK，可在不获取 ROOT 权限的前提下修改本机模拟位置，并支持摇杆移动、路线绘制与沿路线自动行进。
+
+地图与坐标输入使用百度 **BD09** 坐标系；系统测试定位提供器与路线引擎使用 **WGS84**。两套坐标系在边界处只换算一次，请勿在业务层重复转换。
+
+包名与应用 ID 为 `com.iterlocus.pathway`。当前产物仅提供 **arm64-v8a**。
 
 ## 警告
 
-&emsp;&emsp;**有很多人将此类工具用在校园运动类 APP（包括但不限于闪动校园、TakeTwo、运动世界校园等）中作弊，在此提醒：**
+此类工具常见于校园运动类应用的作弊讨论。请明确：
 
 1. **行屿不支持任何校园运动类 APP 的作弊行为**
-2. **行屿开发者也不赞同采用任何形式在校园运动中作弊**
-
-## 背景
-
-&emsp;&emsp;本项目的全部核心实现来自上游影梭。上游作者在玩一款 VR 游戏「一起来捉妖」时，为了省事而研究出无需 ROOT 的定位修改方案，并将研究结果开源出来方便大家一起学习。上游原话如下（重要的事情说三遍！否则后果自负）：
-
-1. 该 APP 仅仅是为了学习 Android + 百度地图的实现方法，请勿用于游戏作弊！
-2. 该 APP 仅仅是为了学习 Android + 百度地图的实现方法，请勿用于游戏作弊！
-3. 该 APP 仅仅是为了学习 Android + 百度地图的实现方法，请勿用于游戏作弊！
+2. **开发者不赞同任何形式的校园运动作弊**
+3. 本软件**仅供学习 Android 开发与定位调试技术**，滥用后果自负
 
 ## 功能
 
-1. 定位修改
-2. 摇杆控制移动
-3. 历史记录
-4. 位置搜索
-5. 直接输入坐标
+### 虚拟定位
 
-## 截图
+- 地图选点、POI 搜索、历史记录回放
+- 手动输入坐标（BD09 / GPS）
+- 前台服务持续推送 GPS / Network 测试定位
+- 悬浮摇杆控制移动，可配置步行 / 跑步 / 骑行速度
+- 可选海拔高度（手动输入，或在关闭模拟后采集 GNSS）
+- 历史位置与搜索记录本地存储，可配置保留天数
 
-![joystick.jpg](./docs/images/joystick.jpg)
-![search_history.jpg](./docs/images/search_history.jpg)
-![map.jpg](./docs/images/map.jpg)
+### 路线
 
-> 以上截图来自上游项目，尚未替换。
+- **绘制路线**：点绘制 / 线绘制，支持闭合、撤销、清空
+- **均匀密化**：按总长等分插入 N 个点（总长等分 N+1 段）
+- **历史路线**：本地保存、编辑、删除；同名拒绝覆盖
+- **模拟路线**：选择已保存路线与速度档位后开始行进
+  - 引擎运行在前台服务 `ServiceGo` 中，切到其他应用后仍继续
+  - 支持暂停 / 继续 / 结束；闭合路线可无限循环并统计圈数
+  - 可选平滑随机偏移（连续漂移，不是逐帧白噪声）
+  - 路线进行中会禁用摇杆；瞬移会结束当前路线
 
-## 用法
+### NFC 位置卡
 
-1. 下载 APK 直接安装
-2. 启动行屿，赋予相关权限
-3. 单击地图位置，然后点击启动按钮
+- 读取 NFC 标签中的 URL / 包名等原始字段（**当前不做 URL 坐标解析**）
+- 配置本地保存与导入
+- 开始路线模拟成功后，可通过 `:nfc` 模块的公开 API 发送定向伪 NDEF 事件（含包名时优先 `ACTION_NDEF_DISCOVERED` + AAR，失败再降级 `ACTION_VIEW`）
+- 无 NFC 硬件时功能不可用；接收标签的界面保持默认启动模式
+
+### 其他
+
+- 设置：摇杆类型、速度、海拔、随机偏移、日志开关等
+- 侧滑菜单：历史记录、读取 NFC、绘制路线、历史路线、模拟路线、设置、开发人员选项
+- 侧滑菜单「更多」
+  - **检测更新**：对照 GitHub Releases（`XYS-DEL/pathway`），启动时静默检查；手动检查会提示结果
+  - **问题反馈**：打开仓库 GitHub Issues
+  - **联系作者**：弹窗二选一——发送邮件（`3322794490@qq.com`）或打开 GitHub 仓库
+- 渠道地址集中在 `AppConfig.java`，改仓库或邮箱时只改这一处
+
+界面改动（地图覆盖层、配色、布局）需在真机验收；单元测试与 lint 无法覆盖这些路径。
+
+## 使用
+
+1. 获取并安装 arm64-v8a 的 APK
+2. 首次启动：阅读并同意用户协议与隐私政策，授予定位等权限
+3. 在系统开发者选项中，将「选择模拟位置信息应用」设为行屿
+4. 打开定位与网络（Wi-Fi 开启时模拟位置可能被真实定位拉回，属调试 API 限制）
+5. 在地图上点选位置，点击启动按钮开始模拟；再次点击可瞬移或停止
+6. 需要路线时：侧滑菜单 →「绘制路线」保存 →「模拟路线」选择并开始
+7. 需要 NFC 时：侧滑菜单 →「读取NFC」；也可在模拟界面导入已保存配置
 
 ## 构建
 
-&emsp;&emsp;需要 JDK 17–21（Gradle 8.13 不支持 JDK 25）。签名凭据与百度地图 AK 在 `local.properties` 中配置，详见 [CLAUDE.md](./CLAUDE.md)。
+| 项目 | 要求 |
+| --- | --- |
+| 语言 | 纯 Java（无 Kotlin），编译目标 Java 11 |
+| Gradle / AGP | Wrapper 8.13 / Android Gradle Plugin 8.12.1 |
+| JDK | **17–21**（Gradle 8.13 无法运行在 JDK 25 上） |
+| 模块 | `:app`（应用）、`:nfc`（可复用 NFC 库） |
+| ABI | 仅 `arm64-v8a` |
+| SDK | minSdk 27（`:nfc` 为 21）、compileSdk / targetSdk 32 |
+
+`local.properties`（已 gitignore）至少需要：
+
+```properties
+sdk.dir=...
+MAPS_API_KEY=你的百度地图 Android SDK AK
+```
+
+可选：发布签名（无则 `assembleRelease` 会明确失败，debug 可回退系统 debug keystore）：
+
+```properties
+RELEASE_STORE_FILE=keystore/release.jks
+RELEASE_STORE_PASSWORD=...
+RELEASE_KEY_ALIAS=...
+RELEASE_KEY_PASSWORD=...
+```
+
+说明：
+
+- 百度 AK 按「包名 + 签名 SHA1」绑定。请用 `com.iterlocus.pathway` 与你自己的 keystore SHA1 申请，并勾选**地图 SDK 与定位 SDK**。填错或签名变更时**不会编译失败**，只会地图空白。
+- `MAPS_SAFE_CODE` 在当前 Java 代码中无引用，编译不依赖它。
+- 签名凭据不得写入版本库；`secrets-gradle-plugin` 已将 `RELEASE_.*` 排除在 `BuildConfig` 之外。
+- Windows 下请用 `gradlew.bat`；若默认 `JAVA_HOME` 是 JDK 25，可临时指定，例如 `JAVA_HOME="C:\Program Files\Java\jdk-21.0.10"`。
+
+常用命令：
 
 ```bash
 ./gradlew assembleDebug
+./gradlew assembleRelease
+./gradlew assembleDebug lintDebug testDebugUnitTest   # 与 CI 一致
+./gradlew :app:testDebugUnitTest --tests "com.iterlocus.pathway.RoutePlayerTest"
+./gradlew :nfc:testDebugUnitTest
 ```
 
-## 文档
+产物文件名形如：`Pathway_<versionName>_arm64-v8a_{debug,release}.apk`。
 
-&emsp;&emsp;上游开发过程中遇到的一些问题记录在作者的博客中，参见：<https://blog.csdn.net/zcshoucsdn/category_10559121.html>
+### 仓库结构（简）
 
-&emsp;&emsp;如果有疑问可以直接搜索 ISSUE 或者在上面直接提交问题。
+| 路径 | 说明 |
+| --- | --- |
+| `app/` | 主应用 `com.iterlocus.pathway` |
+| `nfc/` | 可独立复制的 NFC 库 `com.acooldog.nfc`（公开 API 见 [nfc/README.md](./nfc/README.md)） |
+| `keystore/` | 本地签名文件目录（不进版本库） |
+| `docs/` | 图片与设计记录 |
+| `AGENTS.md` | 仓库工作约定（构建命令、坐标系、模块边界等） |
+| `CLAUDE.md` | 架构说明与实现注意事项 |
 
-## 参考
-
-&emsp;&emsp;上游作者在编写影梭的过程中，参考了很多网友分享的技术文章、示例代码等。包括但不限于以下列出的几个：
-
-1. <https://github.com/Hilaver/MockGPS>
-2. <https://github.com/bxxfighting/together-go>
-3. <https://github.com/P72B/Mocklation>
+路线几何、路线播放引擎、名称校验等逻辑与 Android 解耦，可在 JVM 单元测试中验证。
 
 ## FAQ
 
-Q：为何不支持 Android 8.0 以下版本？
+**为何最低支持 Android 8.0（API 27）？**  
+调试定位相关实现按较新系统版本适配与验证；更旧版本未测试，故不承诺支持。
 
-A：因为上游作者手里没有机器无法进行适配。
+**定位偶尔飘回真实位置？**  
+调试 API 的固有限制。手机同时开启基站 / Wi-Fi 等定位方式时更容易出现。可在设置中关闭 Wi-Fi 后重试（应用内会提示）。
 
-Q：为何定位不是很稳定，偶尔会飘回真实位置？
+**是否支持鸿蒙？**  
+非本仓库重点测试环境，目前不考虑适配。
 
-A：这是由于实现原理导致的，Android 调试 API 固有的问题。确切地说，应该是由于手机本身还开启了其他定位方式（例如基站定位、wifi 定位等）导致的。
+**为何在部分腾讯系应用中定位不生效？**  
+应用可能使用自定义定位通道，不受系统 mock provider 影响。
 
-Q：是否支持鸿蒙系统？
+**编译时报 Java / class file 版本错误？**  
+`JAVA_HOME` 过新。Gradle 8.13 请使用 JDK 17–21。
 
-A：经过测试，可以在鸿蒙系统上正常运行。
+**地图不显示？**  
+检查 `MAPS_API_KEY` 是否与包名 `com.iterlocus.pathway` 及当前签名 SHA1 匹配，以及是否开通了地图与定位服务。
 
-Q：为何在微信等腾讯系应用上定位不起作用？
+**路线模拟进度在后台停住？**  
+请确认模拟服务仍在前台运行；系统省电策略或手动停止服务都会中断。行屿将播放引擎放在前台服务中，正是为了避免 Activity 在后台被冻结。
 
-A：建议去问一下腾讯。
+**NFC 卡片会解析出坐标吗？**  
+当前版本只读取并展示原始 URL / 包名，不做坐标解析；解析能力按卡片格式单独演进。
 
-Q：编译时 java 报错？
+## 文档
 
-A：Gradle 使用的 java 版本与 Android Studio 使用的不一致。Gradle 默认会在环境变量中搜索 `JAVA_HOME` 来确定 Java 位置。注意 Gradle 8.13 不支持 JDK 25，请使用 JDK 17–21。
+- 架构与实现细节：[CLAUDE.md](./CLAUDE.md)
+- 开发者 / Agent 约定：[AGENTS.md](./AGENTS.md)
+- NFC 库接入说明：[nfc/README.md](./nfc/README.md)
+- 功能设计记录：`docs/superpowers/specs/`
+- 安全漏洞报告：[SECURITY.md](./SECURITY.md)
 
-Q：地图不显示 / 定位无效？
+## 贡献
 
-A：百度地图 AK 按「包名 + 签名 SHA1」绑定校验。请用 `com.iterlocus.pathway` 与你自己的 keystore SHA1 申请 AK，填入 `local.properties` 的 `MAPS_API_KEY` 即可。注意需要勾选地图 SDK 与定位 SDK 服务；`MAPS_SAFE_CODE` 目前代码中已无引用。
+1. Fork 本仓库
+2. 在特性分支修改
+3. 提交 PR，并附上必要的真机验证说明（涉及 UI / 地图 / 定位时）
 
-## 如何贡献
+请保持纯 Java 风格与既有包边界；`:nfc` 仅通过 `com.acooldog.nfc` 公开 API 使用，不要依赖 `internal` 包。
 
-1. FORK -> PR
-2. 加入开发，共同完善
+## 历史沿革与许可
 
-## 许可证
+**行屿**在开发过程中曾以开源项目 [影梭 (GoGoGo)](https://github.com/ZCShou/GoGoGo) 为基础进行二次开发，核心无 ROOT 模拟定位方案与部分历史实现来源于该项目及其社区。此后本仓库在包名、构建签名、路线模拟、NFC 等方向持续独立演进，文档与产品叙述以**行屿**为准。
 
-GPL-3.0-only © ZCShou
+本项目遵循 **[GPL-3.0-only](./LICENSE)**。原始版权归 **© ZCShou** 所有；行屿在保留上述版权声明与许可文本的前提下进行修改与分发。
 
-本项目为影梭 (GoGoGo) 的二次开发分支，原始版权归 ZCShou 所有，遵循 GPL-3.0-only 许可。
+依据 GPL-3.0：任何分发本仓库或其衍生版本的行为，都必须继续以 GPL-3.0 开源并提供完整源码，同时保留原始版权声明与许可文本。**请勿闭源分发。**
+
+---
+
+<div align="center">
+
+GPL-3.0-only · 行屿 (Pathway) · 基于 © ZCShou 的开源实现持续演进
+
+</div>
