@@ -150,10 +150,16 @@
     <string name="update_ignore">忽略一次</string>
     <string name="update_time">更新时间：</string>
     <string name="update_commit">提交信息：</string>
-    <string name="update_disabled">更新检查暂未开放</string>
+    <string name="update_disabled">更新检查配置有误，请稍后再试</string>
+    <string name="update_check_failed">检查更新失败，请检查网络后重试</string>
 
-    <!-- 意见反馈 -->
-    <string name="feedback_disabled">反馈渠道暂未开放</string>
+    <!-- 问题反馈 / 联系作者 -->
+    <string name="feedback_disabled">反馈地址未配置，请稍后再试</string>
+    <string name="contact_dialog_title">联系作者</string>
+    <string name="contact_via_email">发送邮件</string>
+    <string name="contact_via_github">打开 GitHub 仓库</string>
+    <string name="contact_email_subject">[反馈][行屿] </string>
+    <string name="contact_no_channel">暂无可用联系方式</string>
 
     <!-- 通用弹框 -->
     <string name="app_dialog_confirm">确定</string>

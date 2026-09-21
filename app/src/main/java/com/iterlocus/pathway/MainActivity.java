@@ -460,16 +460,9 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
             } else if (id == R.id.nav_update) {
                 checkUpdateVersion(true);
             } else if (id == R.id.nav_feedback) {
-                File file = new File(getExternalFilesDir("Logs"), GoApplication.LOG_FILE_NAME);
-                ShareUtils.shareFile(this, file, item.getTitle().toString());
+                openFeedbackUrl();
             } else if (id == R.id.nav_contact) {
-                if (AppConfig.FEEDBACK_URL.isEmpty()) {
-                    GoUtils.DisplayToast(this, getResources().getString(R.string.feedback_disabled));
-                } else {
-                    Uri uri = Uri.parse(AppConfig.FEEDBACK_URL);
-                    Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-                    startActivity(intent);
-                }
+                showContactAuthorDialog();
             }
 
             DrawerLayout drawer = findViewById(R.id.drawer_layout);
@@ -1172,6 +1165,68 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
         return data;
     }
 
+    /*============================== 反馈 / 联系  相关 ==============================*/
+
+    /** 「问题反馈」：打开 GitHub Issues。 */
+    private void openFeedbackUrl() {
+        if (AppConfig.FEEDBACK_URL.isEmpty()) {
+            GoUtils.DisplayToast(this, getResources().getString(R.string.feedback_disabled));
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(AppConfig.FEEDBACK_URL)));
+        } catch (Exception e) {
+            GoUtils.DisplayToast(this, getResources().getString(R.string.feedback_disabled));
+        }
+    }
+
+    /** 「联系作者」：邮件 / GitHub 仓库二选一。 */
+    private void showContactAuthorDialog() {
+        final boolean hasEmail = !AppConfig.CONTACT_EMAIL.isEmpty();
+        final boolean hasGithub = !AppConfig.CONTACT_GITHUB_URL.isEmpty();
+        if (!hasEmail && !hasGithub) {
+            GoUtils.DisplayToast(this, getResources().getString(R.string.contact_no_channel));
+            return;
+        }
+
+        final ArrayList<String> options = new ArrayList<>();
+        if (hasEmail) {
+            options.add(getString(R.string.contact_via_email));
+        }
+        if (hasGithub) {
+            options.add(getString(R.string.contact_via_github));
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.contact_dialog_title)
+                .setItems(options.toArray(new String[0]), (dialog, which) -> {
+                    String chosen = options.get(which);
+                    if (hasEmail && chosen.equals(getString(R.string.contact_via_email))) {
+                        openContactEmail();
+                    } else if (hasGithub && chosen.equals(getString(R.string.contact_via_github))) {
+                        try {
+                            startActivity(new Intent(Intent.ACTION_VIEW,
+                                    Uri.parse(AppConfig.CONTACT_GITHUB_URL)));
+                        } catch (Exception e) {
+                            GoUtils.DisplayToast(this, getResources().getString(R.string.contact_no_channel));
+                        }
+                    }
+                })
+                .setNegativeButton(R.string.app_dialog_cancel, null)
+                .show();
+    }
+
+    private void openContactEmail() {
+        Intent intent = new Intent(Intent.ACTION_SENDTO);
+        intent.setData(Uri.parse("mailto:" + AppConfig.CONTACT_EMAIL));
+        intent.putExtra(Intent.EXTRA_SUBJECT, getString(R.string.contact_email_subject));
+        try {
+            startActivity(Intent.createChooser(intent, getString(R.string.contact_via_email)));
+        } catch (Exception e) {
+            GoUtils.DisplayToast(this, getResources().getString(R.string.contact_no_channel));
+        }
+    }
+
     /*============================== 更新 相关 ==============================*/
     private void initUpdateVersion() {
         mDownloadManager =(DownloadManager) MainActivity.this.getSystemService(DOWNLOAD_SERVICE);
@@ -1202,6 +1257,10 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 XLog.i("更新检测失败");
+                if (result) {
+                    runOnUiThread(() -> GoUtils.DisplayToast(MainActivity.this,
+                            getResources().getString(R.string.update_check_failed)));
+                }
             }
 
             @Override
@@ -1262,6 +1321,10 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                             }
                         } catch (JSONException e) {
                             XLog.e("ERROR: resolve json");
+                            if (result) {
+                                GoUtils.DisplayToast(MainActivity.this,
+                                        getResources().getString(R.string.update_check_failed));
+                            }
                         }
                     });
                 }
