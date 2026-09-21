@@ -58,6 +58,37 @@ Verify a built APK's signer with:
 "$LOCALAPPDATA/Android/Sdk/build-tools/<ver>/apksigner.bat" verify --print-certs app/build/outputs/apk/release/*.apk
 ```
 
+### 发布（推 tag 就是发布）
+
+`build-release.yml` 由 `push: tags: ['*']` 或手动 `workflow_dispatch` 触发：还原签名密钥、写
+`local.properties`、`assembleRelease`，再用 `softprops/action-gh-release` **建 Release 并挂上 APK**。
+所以**推一个 tag 就等于对外发布**，中间没有确认步骤，也没有「先建草稿」的缓冲。
+
+**版本号必须和 tag 一起升，这不是形式主义。** 更新检查判的是（`MainActivity` 的更新回调）：
+
+```java
+curVersion != null
+    && (!getRetJson.getString("name").contains(curVersion)
+     || !getRetJson.getString("tag_name").contains(curVersion))
+```
+
+即**子串包含**，不是语义化版本比较。推论：
+
+- tag 升到 `v1.0.1` 而 `versionName` 仍是 `1.0.0`，用户装上新版后 `curVersion` 还是 `1.0.0`，
+  新 release 的 `name` / `tag_name` 都不含它 ⇒ **永远提示有更新，而且永远装不完**。
+- 反过来，`versionName` 只要是 tag 的**子串**就成立（`1.0.1` 落在 `v1.0.1` 里）。但这也意味着
+  它会被别的 tag 意外满足——`1.0.1` 同时是 `v1.0.10` 的子串。命名别玩花样。
+- 请求打的是 `/releases/latest`，该端点**不含 draft 与 prerelease**，所以草稿阶段用户查不到。
+- `versionCode` 也一并递增：它是系统判断新旧的依据，降级安装会被拒绝；`versionName` 只影响
+  更新提示与 APK 文件名，两者不要混为一谈。
+
+CI **不会**替你改 `app/build.gradle` 里的 `versionCode` / `versionName`——发版前手动同步。
+`versionName` 变了，产物名也跟着变（`Pathway_<versionName>_arm64-v8a_release.apk`）。
+
+Release 正文由 `ardalanamini/auto-changelog` 按 commit 前缀（`feat:` / `fix:` / `docs:` / `chore:` …）
+自动生成，**只含上一个 release 之后的提交**；workflow 不写正文，所以想要手写的功能清单与注意事项，
+发完之后去网页上改 release body。
+
 ### Required local setup
 
 `app/build.gradle` applies Google's `secrets-gradle-plugin`, which reads `MAPS_API_KEY` and `MAPS_SAFE_CODE` from `local.properties` and emits them as `BuildConfig` fields. **These are a hard compile dependency**: if they are absent the plugin omits the fields entirely and `compileDebugJavaWithJavac` fails with `符号: 变量 MAPS_API_KEY`. So `local.properties` needs `sdk.dir` plus both keys before anything compiles:
