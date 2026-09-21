@@ -25,6 +25,32 @@ Pathway mocks the device location without root by using Android’s mock-locatio
 
 Map/UI coordinates are **BD09**; mock providers and the route engine use **WGS84**. Convert only at the boundary.
 
+## Disclaimer
+
+Pathway is an **Android location-debugging tool**: it exists for learning how Android's location
+framework works and for debugging the location-aware apps you are developing.
+**It is not designed to circumvent any platform's rules.**
+
+1. **Using it to cheat in campus-running / attendance, fitness, or game apps is strictly
+   prohibited.** Pathway does not support, endorse, or assist any such cheating.
+2. **For learning Android development and location debugging only.** Use it on your own device,
+   against your own apps, or in a test scenario you are explicitly authorised to use.
+3. **You bear the consequences of misuse.** Using this software may violate the target app's terms
+   of service, your school's or employer's rules, and in some circumstances local law. Any fallout —
+   including but not limited to account bans, disciplinary action, and legal liability — is yours
+   alone; the developer accepts no responsibility.
+4. **Mock locations are detectable.** Pathway relies on Android's debug location APIs and requires
+   Developer Options to be enabled; a target app can call `Location.isMock()` (API 31+) or
+   `Location.isFromMockProvider()` to tell that a fix comes from a mock provider. **Pathway does
+   not, and will not, attempt to evade such detection.**
+5. **Do not use it to deceive people or for any fraudulent purpose.**
+6. **The software is provided "as is", without warranty of any kind**, express or implied, including
+   the warranties of merchantability, fitness for a particular purpose, and non-infringement; see
+   [GPL-3.0](./LICENSE) sections 15 and 16.
+
+By continuing to use this software you acknowledge that you have read, understood, and accepted all
+of the above.
+
 ## Features
 
 - Mock location via test GPS / Network providers in a foreground service
